@@ -3,7 +3,7 @@ const User = require('../entities/User');
 const Quote = require('../entities/Quote');
 const Alert = require('../entities/Alert');
 const Activity = require('../entities/Activity');
-const { notifyUser, notifyRequest } = require('../socket/socketManager');
+const { notifyUser, notifyRequest, broadcastEvent } = require('../socket/socketManager');
 
 async function createServiceRequest(req, res, next) {
   try {
@@ -57,7 +57,8 @@ async function createServiceRequest(req, res, next) {
       notifyUser(targetTechnicianId, 'alert:new', alert.toObject());
     }
 
-    notifyRequest(request._id.toString(), 'request:created', request.toObject());
+    // Broadcast globally so all technicians can see the new request
+    broadcastEvent('request:created', request.toObject());
 
     res.status(201).json(request);
   } catch (err) {

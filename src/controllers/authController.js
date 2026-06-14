@@ -32,8 +32,8 @@ async function syncUser(req, res, next) {
           name: name || 'Usuario',
           email: email || `user_${uid}@fixradar.com`,
           profileImageUrl: profileImageUrl || '',
-          userType: userType || 'client',
-          role: userType || 'client',
+          userType: userType || null,
+          role: userType || null,
           referralCode: myReferralCode,
           fcmToken: fcmToken || null,
         });

@@ -164,4 +164,8 @@ function notifyRequest(requestId, event, data) {
   if (io) io.to(`request:${requestId}`).emit(event, data);
 }
 
-module.exports = { initSocket, getIO, notifyUser, notifyRequest };
+function broadcastEvent(event, data) {
+  if (io) io.emit(event, data);
+}
+
+module.exports = { initSocket, getIO, notifyUser, notifyRequest, broadcastEvent };
