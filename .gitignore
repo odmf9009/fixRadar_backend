@@ -6,4 +6,4 @@ dist/
 coverage/
 .DS_Store
 serviceAccountKey.json
-firebase-adminsdk*.json
+# firebase-adminsdk*.json  (temporalmente subido para setup multi-PC)
