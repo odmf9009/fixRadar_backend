@@ -4,38 +4,49 @@ const admin = require('../config/firebase');
 // Called after Firebase Auth on the client. Upserts the user in MongoDB.
 async function syncUser(req, res, next) {
   try {
-    const { uid, email } = req;
+    const uid = req.uid;
+    const email = req.email;
     const { name, profileImageUrl, userType, referralCode, fcmToken } = req.body;
 
-    let user = await User.findById(uid);
+    if (!uid) {
+      return res.status(401).json({ error: 'UID not found in request' });
+    }
+
+    console.log(`[Auth] Syncing user: ${uid} (${email || 'no email'})`);
+
+    let user;
+    try {
+      user = await User.findById(uid);
+    } catch (dbErr) {
+      console.error('[Database Error] findById failed:', dbErr);
+      throw new Error('Database connection error');
+    }
 
     if (!user) {
-      // Generate referral code from name
+      console.log(`[Auth] Creating new user: ${uid}`);
       const myReferralCode = `${(name || 'USER').slice(0, 4).toUpperCase()}${uid.slice(-4).toUpperCase()}`;
 
-      user = await User.create({
-        _id: uid,
-        name: name || 'Usuario',
-        email: email || '',
-        profileImageUrl: profileImageUrl || '',
-        userType: userType || 'client',
-        role: userType || 'client',
-        referralCode: myReferralCode,
-        fcmToken: fcmToken || null,
-      });
-
-      // Process referral if provided
-      if (referralCode) {
-        const referrer = await User.findOne({ referralCode });
-        if (referrer && referrer._id !== uid) {
-          await User.findByIdAndUpdate(referrer._id, {
-            $inc: { referralCount: 1, successfulReferrals: 1, referralXpEarned: 100 },
-          });
-          await User.findByIdAndUpdate(uid, { referredBy: referrer._id });
+      try {
+        user = await User.create({
+          _id: uid,
+          name: name || 'Usuario',
+          email: email || `user_${uid}@fixradar.com`,
+          profileImageUrl: profileImageUrl || '',
+          userType: userType || 'client',
+          role: userType || 'client',
+          referralCode: myReferralCode,
+          fcmToken: fcmToken || null,
+        });
+      } catch (createErr) {
+        console.error('[Database Error] create user failed:', createErr);
+        // Handle duplicate email or other validation errors
+        if (createErr.code === 11000) {
+           return res.status(400).json({ error: 'Email or UID already exists with different data' });
         }
+        throw createErr;
       }
     } else {
-      // Update fcm token if changed
+      console.log(`[Auth] User exists: ${user._id}`);
       if (fcmToken && user.fcmToken !== fcmToken) {
         user.fcmToken = fcmToken;
         await user.save();
@@ -44,6 +55,7 @@ async function syncUser(req, res, next) {
 
     res.json({ user: user.toObject() });
   } catch (err) {
+    console.error('[Auth Error] syncUser:', err);
     next(err);
   }
 }
