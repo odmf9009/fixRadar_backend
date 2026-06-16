@@ -1,5 +1,6 @@
 const { Server } = require('socket.io');
 const admin = require('../config/firebase');
+const jwt = require('jsonwebtoken');
 const User = require('../entities/User');
 const ChatMessage = require('../entities/ChatMessage');
 const ServiceRequest = require('../entities/ServiceRequest');
@@ -16,16 +17,27 @@ function initSocket(server) {
     transports: ['websocket', 'polling'],
   });
 
-  // Firebase token auth middleware for socket
+  // Auth middleware: accepts Firebase ID tokens (Google) or backend JWT (email/password)
   io.use(async (socket, next) => {
     const token = socket.handshake.auth?.token;
     if (!token) return next(new Error('Authentication required'));
+
+    // Try Firebase first (Google Sign-In)
+    if (admin && admin.auth) {
+      try {
+        const decoded = await admin.auth().verifyIdToken(token);
+        socket.uid = decoded.uid;
+        return next();
+      } catch {}
+    }
+
+    // Fallback: backend JWT (email/password users)
     try {
-      const decoded = await admin.auth().verifyIdToken(token);
-      socket.uid = decoded.uid;
-      next();
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fixradar-secret');
+      socket.uid = decoded.userId;
+      return next();
     } catch {
-      next(new Error('Invalid token'));
+      return next(new Error('Invalid token'));
     }
   });
 
