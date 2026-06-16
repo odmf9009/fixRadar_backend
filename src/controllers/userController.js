@@ -72,7 +72,7 @@ async function getNearbyTechnicians(req, res, next) {
     const { latitude, longitude, radius = 50, specialty, onlyOnline } = req.query;
 
     const filter = {
-      userType: 'technician',
+      $or: [{ role: 'technician' }, { userType: 'technician' }],
     };
 
     if (onlyOnline === 'true') {
@@ -113,7 +113,7 @@ async function getNearbyTechnicians(req, res, next) {
 async function getTopTechnicians(req, res, next) {
   try {
     // Show top technicians even if they have 0 completed jobs (for new platforms)
-    const technicians = await User.find({ userType: 'technician' })
+    const technicians = await User.find({ $or: [{ role: 'technician' }, { userType: 'technician' }] })
       .sort({ rating: -1, completedJobsCount: -1 })
       .limit(50)
       .select('-email -fcmToken -referralCode -referredBy')

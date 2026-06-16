@@ -3,10 +3,10 @@ const User = require('../entities/User');
 
 async function sendPushNotification(userId, { title, body, data = {} }) {
   try {
-    const user = await User.findById(userId).select('fcmToken notificationsEnabled');
+    const user = await User.findById(userId).select('fcmToken notificationsEnabled isOnline');
 
-    if (!user || !user.fcmToken || user.notificationsEnabled === false) {
-      console.log(`[Push] Skip: User ${userId} has no token or notifications disabled`);
+    if (!user || !user.fcmToken || user.notificationsEnabled === false || user.isOnline === false) {
+      console.log(`[Push] Skip: User ${userId} — no token, notifications disabled, or offline`);
       return;
     }
 
