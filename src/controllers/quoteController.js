@@ -4,6 +4,7 @@ const User = require('../entities/User');
 const Alert = require('../entities/Alert');
 const Activity = require('../entities/Activity');
 const { notifyUser, notifyRequest } = require('../socket/socketManager');
+const { sendPushNotification } = require('../utils/notifications');
 
 async function sendQuote(req, res, next) {
   try {
@@ -69,6 +70,17 @@ async function sendQuote(req, res, next) {
     });
     notifyRequest(requestId, 'quote:new', quote.toObject());
 
+    // Send Push Notification
+    sendPushNotification(request.clientId, {
+      title: '¡Nueva propuesta recibida!',
+      body: `${technician.name} ha enviado un presupuesto para: ${request.title}`,
+      data: {
+        type: 'quote_received',
+        requestId: requestId,
+        quoteId: quote._id.toString(),
+      },
+    });
+
     res.status(201).json(quote);
   } catch (err) {
     next(err);
@@ -99,6 +111,17 @@ async function getQuotesForRequest(req, res, next) {
 async function getMyQuotes(req, res, next) {
   try {
     const quotes = await Quote.find({ technicianId: req.uid })
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json(quotes);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function getQuotesForClient(req, res, next) {
+  try {
+    const quotes = await Quote.find({ clientId: req.uid })
       .sort({ createdAt: -1 })
       .lean();
     res.json(quotes);
@@ -194,4 +217,11 @@ async function rejectQuote(req, res, next) {
   }
 }
 
-module.exports = { sendQuote, getQuotesForRequest, getMyQuotes, acceptQuote, rejectQuote };
+module.exports = {
+  sendQuote,
+  getQuotesForRequest,
+  getMyQuotes,
+  getQuotesForClient,
+  acceptQuote,
+  rejectQuote
+};
