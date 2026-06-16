@@ -26,6 +26,15 @@ async function updateMe(req, res, next) {
       if (req.body[field] !== undefined) update[field] = req.body[field];
     }
 
+    // Handle location if provided directly
+    if (req.body.latitude !== undefined && req.body.longitude !== undefined) {
+      update.location = {
+        type: 'Point',
+        coordinates: [parseFloat(req.body.longitude), parseFloat(req.body.latitude)],
+      };
+      update.lastLocationUpdate = new Date();
+    }
+
     const user = await User.findByIdAndUpdate(req.uid, update, { new: true }).lean();
     res.json(user);
   } catch (err) {
