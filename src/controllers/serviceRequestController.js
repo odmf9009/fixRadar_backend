@@ -60,6 +60,48 @@ async function createServiceRequest(req, res, next) {
     // Broadcast globally so all technicians can see the new request
     broadcastEvent('request:created', request.toObject());
 
+    // Notify nearby technicians via Alerts (Radar)
+    try {
+      const nearbyTechs = await User.find({
+        userType: 'technician',
+        isOnline: true,
+        notificationsEnabled: true,
+        specialties: { $in: [category, 'Handyman'] },
+        location: {
+          $near: {
+            $geometry: { type: 'Point', coordinates: [parseFloat(longitude), parseFloat(latitude)] },
+            $maxDistance: 20000, // 20km radius for alerts
+          },
+        },
+      }).limit(20);
+
+      for (const tech of nearbyTechs) {
+        if (tech._id === req.uid) continue; // Don't notify self
+
+        const alert = await Alert.create({
+          userId: tech._id,
+          requestId: request._id.toString(),
+          requestTitle: `¡Nuevo problema cerca! ${title}`,
+          requestImageUrl: imageUrls?.[0] || '',
+          address,
+          distance: 0,
+          type: 'nearby',
+        });
+        notifyUser(tech._id, 'alert:new', alert.toObject());
+
+        sendPushNotification(tech._id, {
+          title: '¡Nuevo trabajo cerca!',
+          body: `Hay un nuevo problema de ${category} cerca de tu ubicación.`,
+          data: {
+            type: 'nearby_request',
+            requestId: request._id.toString(),
+          },
+        });
+      }
+    } catch (e) {
+      console.error('[NearbyAlert] Error:', e);
+    }
+
     res.status(201).json(request);
   } catch (err) {
     next(err);
@@ -156,12 +198,51 @@ async function updateRequestStatus(req, res, next) {
         requestId: request._id.toString(),
         status,
       });
+
+      // Alert for technician if client cancels or something
+      if (status === 'cancelled') {
+        const alert = await Alert.create({
+          userId: request.technicianId,
+          requestId: request._id.toString(),
+          requestTitle: `Pedido cancelado: ${request.title}`,
+          requestImageUrl: request.imageUrls?.[0] || '',
+          address: request.address,
+          distance: 0,
+          type: 'system',
+        });
+        notifyUser(request.technicianId, 'alert:new', alert.toObject());
+      }
     }
+
     if (isTechnician) {
       notifyUser(request.clientId, 'request:status', {
         requestId: request._id.toString(),
         status,
       });
+
+      // Alert for client if technician finishes or arrives
+      let alertTitle = '';
+      if (status === 'finishedByTechnician') alertTitle = 'El técnico terminó el trabajo';
+      if (status === 'inProgress') alertTitle = 'El técnico ha llegado al lugar';
+
+      if (alertTitle) {
+        const alert = await Alert.create({
+          userId: request.clientId,
+          requestId: request._id.toString(),
+          requestTitle: `${alertTitle}: ${request.title}`,
+          requestImageUrl: request.imageUrls?.[0] || '',
+          address: request.address,
+          distance: 0,
+          type: 'system',
+        });
+        notifyUser(request.clientId, 'alert:new', alert.toObject());
+
+        sendPushNotification(request.clientId, {
+          title: alertTitle,
+          body: `El técnico ha actualizado el estado de tu pedido: ${request.title}`,
+          data: { type: 'status_update', requestId: request._id.toString() },
+        });
+      }
     }
 
     res.json(request);

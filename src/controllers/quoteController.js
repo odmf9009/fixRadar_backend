@@ -215,9 +215,31 @@ async function rejectQuote(req, res, next) {
     quote.history.push({ action: 'rejected', by: req.uid, message: req.body.reason || '' });
     await quote.save();
 
-    notifyUser(quote.technicianId, 'quote:rejected', { quoteId: quote._id.toString() });
+    const alert = await Alert.create({
+      userId: quote.technicianId,
+      requestId: request._id.toString(),
+      requestTitle: `Presupuesto rechazado: ${request.title}`,
+      requestImageUrl: request.imageUrls?.[0] || '',
+      address: request.address,
+      distance: 0,
+      type: 'system',
+    });
+
+    notifyUser(quote.technicianId, 'quote:rejected', {
+      quoteId: quote._id.toString(),
+      alert: alert.toObject()
+    });
     notifyUser(req.uid, 'quote:rejected', { quoteId: quote._id.toString() });
     notifyRequest(quote.requestId.toString(), 'quote:rejected', { quoteId: quote._id.toString() });
+
+    sendPushNotification(quote.technicianId, {
+      title: 'Presupuesto rechazado',
+      body: `El cliente ha rechazado tu propuesta para: ${request.title}`,
+      data: {
+        type: 'quote_rejected',
+        requestId: request._id.toString(),
+      },
+    });
 
     res.json({ success: true });
   } catch (err) {

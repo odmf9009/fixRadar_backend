@@ -69,12 +69,22 @@ function initSocket(server) {
           readBy: [uid],
         });
 
-        // Update request last message metadata
-        await ServiceRequest.findByIdAndUpdate(requestId, {
+        const request = await ServiceRequest.findByIdAndUpdate(requestId, {
           lastMessageAt: new Date(),
           lastMessageBy: uid,
           lastMessageText: text || (type === 'image' ? '📷 Imagen' : '📍 Ubicación'),
         });
+
+        const recipientId = uid === request.clientId ? request.technicianId : request.clientId;
+
+        if (recipientId) {
+          const { sendPushNotification } = require('../utils/notifications');
+          sendPushNotification(recipientId, {
+            title: `Mensaje de ${senderName || 'Usuario'}`,
+            body: text || (type === 'image' ? '📷 Te envió una imagen' : '📍 Te envió una ubicación'),
+            data: { type: 'chat_message', requestId },
+          });
+        }
 
         io.to(`chat:${requestId}`).emit('chat:message', {
           id: message._id.toString(),
