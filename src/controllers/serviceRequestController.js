@@ -177,7 +177,10 @@ async function deleteRequest(req, res, next) {
     if (request.clientId !== req.uid) return res.status(403).json({ error: 'Forbidden' });
 
     await Quote.deleteMany({ requestId: request._id });
+    const requestIdStr = request._id.toString();
     await request.deleteOne();
+
+    broadcastEvent('request:deleted', { requestId: requestIdStr });
 
     res.json({ success: true });
   } catch (err) {
