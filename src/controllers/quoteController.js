@@ -57,11 +57,11 @@ async function sendQuote(req, res, next) {
     const alert = await Alert.create({
       userId: request.clientId,
       requestId: requestId,
-      requestTitle: `Nuevo presupuesto para: ${request.title}`,
+      requestTitle: `${technician.name || technician.username} te ha enviado una cotización para: ${request.title}`,
       requestImageUrl: request.imageUrls?.[0] || '',
       address: request.address,
       distance: 0,
-      type: 'directQuote',
+      type: 'quoteReceived',
     });
 
     notifyUser(request.clientId, 'quote:new', {
