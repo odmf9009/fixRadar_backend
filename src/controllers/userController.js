@@ -60,28 +60,40 @@ async function getPublicProfile(req, res, next) {
 
 async function getNearbyTechnicians(req, res, next) {
   try {
-    const { latitude, longitude, radius = 20, specialty } = req.query;
-    if (!latitude || !longitude) {
-      return res.status(400).json({ error: 'latitude and longitude are required' });
-    }
+    const { latitude, longitude, radius = 50, specialty, onlyOnline } = req.query;
 
     const filter = {
       userType: 'technician',
-      isOnline: true,
-      location: {
+    };
+
+    if (onlyOnline === 'true') {
+      filter.isOnline = true;
+    }
+
+    if (specialty) {
+      filter.specialties = specialty;
+    }
+
+    let technicians;
+    if (latitude && longitude) {
+      filter.location = {
         $near: {
           $geometry: { type: 'Point', coordinates: [parseFloat(longitude), parseFloat(latitude)] },
           $maxDistance: parseFloat(radius) * 1000,
         },
-      },
-    };
-
-    if (specialty) filter.specialties = specialty;
-
-    const technicians = await User.find(filter)
-      .select('-email -fcmToken -referralCode -referredBy')
-      .limit(50)
-      .lean();
+      };
+      technicians = await User.find(filter)
+        .select('-email -fcmToken -referralCode -referredBy')
+        .limit(50)
+        .lean();
+    } else {
+      // If no location, just return technicians (maybe sorted by rating)
+      technicians = await User.find(filter)
+        .sort({ rating: -1 })
+        .select('-email -fcmToken -referralCode -referredBy')
+        .limit(50)
+        .lean();
+    }
 
     res.json(technicians);
   } catch (err) {
@@ -91,7 +103,8 @@ async function getNearbyTechnicians(req, res, next) {
 
 async function getTopTechnicians(req, res, next) {
   try {
-    const technicians = await User.find({ userType: 'technician', completedJobsCount: { $gt: 0 } })
+    // Show top technicians even if they have 0 completed jobs (for new platforms)
+    const technicians = await User.find({ userType: 'technician' })
       .sort({ rating: -1, completedJobsCount: -1 })
       .limit(50)
       .select('-email -fcmToken -referralCode -referredBy')
