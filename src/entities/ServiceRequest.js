@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 
 const serviceRequestSchema = new mongoose.Schema({
   title: { type: String, required: true },
-  description: { type: String, required: true },
+  description: { type: String, default: '' },
   category: { type: String, required: true },
   imageUrls: [String],
   thumbnailUrls: [String],
