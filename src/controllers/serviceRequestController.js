@@ -149,6 +149,7 @@ async function updateRequestStatus(req, res, next) {
       requestId: request._id.toString(),
       status,
     });
+    broadcastEvent('request:status', { requestId: request._id.toString(), status });
 
     if (isClient && request.technicianId) {
       notifyUser(request.technicianId, 'request:status', {
@@ -213,6 +214,7 @@ async function cancelRequest(req, res, next) {
     );
 
     notifyRequest(request._id.toString(), 'request:cancelled', { requestId: request._id.toString() });
+    broadcastEvent('request:status', { requestId: request._id.toString(), status: 'cancelled' });
 
     res.json({ success: true });
   } catch (err) {
