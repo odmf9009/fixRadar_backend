@@ -79,11 +79,15 @@ async function getQuotesForRequest(req, res, next) {
   try {
     const request = await ServiceRequest.findById(req.params.requestId);
     if (!request) return res.status(404).json({ error: 'Request not found' });
-    if (request.clientId !== req.uid && request.technicianId !== req.uid) {
-      return res.status(403).json({ error: 'Forbidden' });
+
+    const filter = { requestId: req.params.requestId };
+
+    // Security: If not the client, only allow seeing their own quote
+    if (request.clientId !== req.uid) {
+      filter.technicianId = req.uid;
     }
 
-    const quotes = await Quote.find({ requestId: req.params.requestId })
+    const quotes = await Quote.find(filter)
       .sort({ createdAt: -1 })
       .lean();
     res.json(quotes);
