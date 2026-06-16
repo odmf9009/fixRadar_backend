@@ -1,4 +1,5 @@
 const admin = require('../config/firebase');
+const jwt = require('jsonwebtoken');
 
 async function authenticate(req, res, next) {
   const header = req.headers.authorization;
@@ -7,17 +8,26 @@ async function authenticate(req, res, next) {
   }
 
   const token = header.split('Bearer ')[1];
-  try {
-    if (!admin || !admin.auth) {
-      console.error('[Auth Error] Firebase Admin not initialized');
-      return res.status(500).json({ error: 'Authentication service unavailable' });
+
+  // Try Firebase ID token first (Google login)
+  if (admin && admin.auth) {
+    try {
+      const decoded = await admin.auth().verifyIdToken(token);
+      req.uid = decoded.uid;
+      req.email = decoded.email;
+      return next();
+    } catch {
+      // Not a Firebase token — fall through to JWT check
     }
-    const decoded = await admin.auth().verifyIdToken(token);
-    req.uid = decoded.uid;
+  }
+
+  // Try backend JWT (email/password login)
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fixradar-secret');
+    req.uid = decoded.userId;
     req.email = decoded.email;
-    next();
-  } catch (err) {
-    console.error('[Auth Error] verifyIdToken failed:', err.message);
+    return next();
+  } catch {
     return res.status(401).json({ error: 'Invalid or expired token' });
   }
 }

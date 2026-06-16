@@ -1,7 +1,9 @@
 const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema({
-  _id: { type: String }, // Firebase UID
+  _id: { type: String }, // Firebase UID or UUID (email-auth users)
+  authProvider: { type: String, enum: ['firebase', 'email'], default: 'firebase' },
+  password: { type: String, default: null, select: false }, // bcrypt hash, email-auth only
   name: { type: String, required: true },
   username: { type: String, default: '' },
   email: { type: String, required: true, unique: true },
