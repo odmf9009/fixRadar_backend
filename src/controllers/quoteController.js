@@ -247,11 +247,24 @@ async function rejectQuote(req, res, next) {
   }
 }
 
+// Returns quotes sent by a specific technician (only own quotes allowed)
+async function getQuotesForTechnician(req, res, next) {
+  try {
+    const quotes = await Quote.find({ technicianId: req.params.id })
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json(quotes);
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   sendQuote,
   getQuotesForRequest,
   getMyQuotes,
   getQuotesForClient,
+  getQuotesForTechnician,
   acceptQuote,
   rejectQuote
 };

@@ -331,9 +331,33 @@ async function markTechnicianInterested(req, res, next) {
 
 async function hideRequest(req, res, next) {
   try {
-    // Stores hidden requests in user's subdocument (just mark in alert/activity)
-    // For simplicity we track it client-side with shared_preferences
+    // Tracks hidden requests client-side with shared_preferences
     res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// Open requests available for technicians to quote on
+async function getAvailableRequests(req, res, next) {
+  try {
+    const requests = await ServiceRequest.find({
+      status: { $in: ['open', 'pending'] },
+    }).sort({ createdAt: -1 }).lean();
+    res.json(requests);
+  } catch (err) {
+    next(err);
+  }
+}
+
+// Completed/closed jobs where the logged-in technician was assigned
+async function getTechnicianHistory(req, res, next) {
+  try {
+    const requests = await ServiceRequest.find({
+      technicianId: req.uid,
+      status: { $in: ['completed', 'closed', 'cancelled'] },
+    }).sort({ updatedAt: -1 }).lean();
+    res.json(requests);
   } catch (err) {
     next(err);
   }
@@ -344,6 +368,8 @@ module.exports = {
   getNearbyRequests,
   getMyRequests,
   getMyAssignedRequests,
+  getAvailableRequests,
+  getTechnicianHistory,
   getRequestById,
   updateRequestStatus,
   deleteRequest,
