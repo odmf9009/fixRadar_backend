@@ -4,6 +4,7 @@ const Quote = require('../entities/Quote');
 const Alert = require('../entities/Alert');
 const Activity = require('../entities/Activity');
 const { notifyUser, notifyRequest, broadcastEvent } = require('../socket/socketManager');
+const { sendPushNotification } = require('../utils/notifications');
 
 async function createServiceRequest(req, res, next) {
   try {
@@ -63,9 +64,9 @@ async function createServiceRequest(req, res, next) {
     // Notify nearby technicians via Alerts (Radar)
     try {
       const nearbyTechs = await User.find({
-        userType: 'technician',
+        $or: [{ role: 'technician' }, { userType: 'technician' }],
         isOnline: true,
-        notificationsEnabled: true,
+        notificationsEnabled: { $ne: false },
         specialties: { $in: [category, 'Handyman'] },
         location: {
           $near: {
