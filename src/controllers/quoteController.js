@@ -97,6 +97,9 @@ async function getQuotesForRequest(req, res, next) {
     // Security: If not the client, only allow seeing their own quote
     if (request.clientId !== req.uid) {
       filter.technicianId = req.uid;
+    } else {
+      // If it is the client, only show pending or counter-offers (active quotes)
+      filter.status = { $in: ['pending', 'counter_offer_sent'] };
     }
 
     const quotes = await Quote.find(filter)
@@ -121,7 +124,10 @@ async function getMyQuotes(req, res, next) {
 
 async function getQuotesForClient(req, res, next) {
   try {
-    const quotes = await Quote.find({ clientId: req.uid })
+    const quotes = await Quote.find({
+      clientId: req.uid,
+      status: { $in: ['pending', 'counter_offer_sent'] }
+    })
       .sort({ createdAt: -1 })
       .lean();
     res.json(quotes);
@@ -210,6 +216,8 @@ async function rejectQuote(req, res, next) {
     await quote.save();
 
     notifyUser(quote.technicianId, 'quote:rejected', { quoteId: quote._id.toString() });
+    notifyUser(req.uid, 'quote:rejected', { quoteId: quote._id.toString() });
+    notifyRequest(quote.requestId.toString(), 'quote:rejected', { quoteId: quote._id.toString() });
 
     res.json({ success: true });
   } catch (err) {
