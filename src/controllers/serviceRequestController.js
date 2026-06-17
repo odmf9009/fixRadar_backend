@@ -107,18 +107,28 @@ async function createServiceRequest(req, res, next) {
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
       };
 
+      console.log(`[NearbyAlert] Found ${nearbyTechs.length} candidate techs for request in [${latitude}, ${longitude}]`);
+
       for (const tech of nearbyTechs) {
         if (tech._id.toString() === req.uid) continue;
 
-        // Skip technicians outside their configured work hours
-        if (!isWithinWorkHours(tech.workHours, tech.weekendAvailability)) continue;
+        // Skip technicians outside their configured work hours (only if explicitly set)
+        if (tech.workHours && tech.workHours !== '9:00 AM - 6:00 PM') {
+          if (!isWithinWorkHours(tech.workHours, tech.weekendAvailability)) {
+            console.log(`[NearbyAlert] Skip ${tech._id}: outside work hours (${tech.workHours})`);
+            continue;
+          }
+        }
 
         // Respect each technician's individual service radius (stored in miles)
         if (tech.location?.coordinates) {
           const [tLon, tLat] = tech.location.coordinates;
           const distMeters = haversine(parseFloat(latitude), parseFloat(longitude), tLat, tLon);
           const techRadiusMeters = (tech.serviceRadius || 20) * 1609.34;
-          if (distMeters > techRadiusMeters) continue;
+          if (distMeters > techRadiusMeters) {
+            console.log(`[NearbyAlert] Skip ${tech._id}: distance ${Math.round(distMeters/1000)}km > radius ${tech.serviceRadius || 20} miles`);
+            continue;
+          }
         }
 
         const alert = await Alert.create({
