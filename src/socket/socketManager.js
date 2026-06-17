@@ -159,8 +159,8 @@ function initSocket(server) {
 
     socket.on('disconnect', async () => {
       console.log(`[Socket] Disconnected: ${uid}`);
+      // Only update lastSeen — isOnline is controlled manually by the technician's radar toggle
       await User.findByIdAndUpdate(uid, {
-        isOnline: false,
         presenceStatus: 'offline',
         lastSeen: new Date(),
       });
