@@ -3,10 +3,10 @@ const User = require('../entities/User');
 
 async function sendPushNotification(userId, { title, body, data = {} }) {
   try {
-    const user = await User.findById(userId).select('fcmToken notificationsEnabled isOnline');
+    const user = await User.findById(userId).select('fcmToken notificationsEnabled');
 
-    if (!user || !user.fcmToken || user.notificationsEnabled === false || user.isOnline === false) {
-      console.log(`[Push] Skip: User ${userId} — no token, notifications disabled, or offline`);
+    if (!user || !user.fcmToken || user.notificationsEnabled === false) {
+      console.log(`[Push] Skip: User ${userId} — no token or notifications disabled`);
       return;
     }
 
@@ -14,6 +14,23 @@ async function sendPushNotification(userId, { title, body, data = {} }) {
       notification: {
         title,
         body,
+      },
+      android: {
+        notification: {
+          channelId: 'fixradar_channel',
+          priority: 'high',
+          sound: 'default',
+        },
+        priority: 'high',
+      },
+      apns: {
+        payload: {
+          aps: {
+            alert: { title, body },
+            sound: 'default',
+            badge: 1,
+          },
+        },
       },
       data: {
         ...data,

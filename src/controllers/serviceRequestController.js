@@ -63,26 +63,68 @@ async function createServiceRequest(req, res, next) {
 
     // Notify nearby technicians via Alerts (Radar)
     try {
+      // Push goes to background users too — only skip if manually disabled
       const nearbyTechs = await User.find({
         $or: [{ role: 'technician' }, { userType: 'technician' }],
-        isOnline: true,
         notificationsEnabled: { $ne: false },
         specialties: { $in: [category, 'Handyman'] },
         location: {
           $near: {
             $geometry: { type: 'Point', coordinates: [parseFloat(longitude), parseFloat(latitude)] },
-            $maxDistance: 20000, // 20km radius for alerts
+            $maxDistance: 80000, // ~50 miles — individual radius checked below
           },
         },
-      }).limit(20);
+      }).select('_id fcmToken notificationsEnabled serviceRadius workHours weekendAvailability location').limit(30);
+
+      // Returns true if current server time is within technician's work hours
+      const isWithinWorkHours = (workHours, weekendAvailability) => {
+        if (!workHours) return true;
+        const now = new Date();
+        const day = now.getDay(); // 0=Sun, 6=Sat
+        if ((day === 0 || day === 6) && !weekendAvailability) return false;
+        const parts = workHours.split(' - ');
+        if (parts.length !== 2) return true;
+        const parseTime = (s) => {
+          const m = s.trim().match(/^(\d+):(\d+)\s*(AM|PM)$/i);
+          if (!m) return null;
+          let h = parseInt(m[1]); const min = parseInt(m[2]); const p = m[3].toUpperCase();
+          if (p === 'PM' && h !== 12) h += 12;
+          if (p === 'AM' && h === 12) h = 0;
+          return h * 60 + min;
+        };
+        const start = parseTime(parts[0]); const end = parseTime(parts[1]);
+        if (start === null || end === null) return true;
+        const nowMin = now.getHours() * 60 + now.getMinutes();
+        return nowMin >= start && nowMin <= end;
+      };
+
+      // Haversine helper (meters)
+      const haversine = (lat1, lon1, lat2, lon2) => {
+        const R = 6371000;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      };
 
       for (const tech of nearbyTechs) {
-        if (tech._id === req.uid) continue; // Don't notify self
+        if (tech._id.toString() === req.uid) continue;
+
+        // Skip technicians outside their configured work hours
+        if (!isWithinWorkHours(tech.workHours, tech.weekendAvailability)) continue;
+
+        // Respect each technician's individual service radius (stored in miles)
+        if (tech.location?.coordinates) {
+          const [tLon, tLat] = tech.location.coordinates;
+          const distMeters = haversine(parseFloat(latitude), parseFloat(longitude), tLat, tLon);
+          const techRadiusMeters = (tech.serviceRadius || 20) * 1609.34;
+          if (distMeters > techRadiusMeters) continue;
+        }
 
         const alert = await Alert.create({
           userId: tech._id,
           requestId: request._id.toString(),
-          requestTitle: `¡Nuevo problema cerca! ${title}`,
+          requestTitle: `¡Nueva incidencia cerca! ${title}`,
           requestImageUrl: imageUrls?.[0] || '',
           address,
           distance: 0,
@@ -91,8 +133,8 @@ async function createServiceRequest(req, res, next) {
         notifyUser(tech._id, 'alert:new', alert.toObject());
 
         sendPushNotification(tech._id, {
-          title: '¡Nuevo trabajo cerca!',
-          body: `Hay un nuevo problema de ${category} cerca de tu ubicación.`,
+          title: '¡Nueva incidencia en tu área!',
+          body: `Se ha publicado un problema de ${category} cerca de tu zona.`,
           data: {
             type: 'nearby_request',
             requestId: request._id.toString(),
