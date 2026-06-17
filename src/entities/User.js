@@ -60,7 +60,7 @@ const userSchema = new mongoose.Schema({
   badges: [String],
   freeQuote: { type: Boolean, default: true },
   emergencyService: { type: Boolean, default: false },
-  workHours: { type: String, default: '9:00 AM - 6:00 PM' },
+  workHours: { type: String, default: null },
   weekendAvailability: { type: Boolean, default: false },
   phoneNumber: { type: String, default: null },
 }, {
