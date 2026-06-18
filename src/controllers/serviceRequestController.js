@@ -191,20 +191,16 @@ async function getNearbyRequests(req, res, next) {
 
 async function getMyRequests(req, res, next) {
   try {
+    // Only show active requests to the client in this tab.
+    // Cancelled and Completed should be in the history screen.
     const requests = await ServiceRequest.find({
       clientId: req.uid,
-      status: { $nin: ['cancelled', 'completed'] }
+      status: { $in: ['open', 'assigned', 'inProgress', 'finishedByTechnician'] }
     })
       .sort({ createdAt: -1 })
       .lean();
 
-    // Add a check to ensure we are returning the _id as id for the frontend if needed
-    const formattedRequests = requests.map(r => ({
-      ...r,
-      id: r._id.toString()
-    }));
-
-    res.json(formattedRequests);
+    res.json(requests);
   } catch (err) {
     next(err);
   }
