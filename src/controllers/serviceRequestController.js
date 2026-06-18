@@ -58,6 +58,9 @@ async function createServiceRequest(req, res, next) {
       notifyUser(targetTechnicianId, 'alert:new', alert.toObject());
     }
 
+    // Notify the client specifically to trigger UI refresh
+    notifyUser(req.uid, 'request:created', request.toObject());
+
     // Broadcast globally so all technicians can see the new request
     broadcastEvent('request:created', request.toObject());
 
