@@ -231,6 +231,7 @@ async function rejectQuote(req, res, next) {
     });
     notifyUser(req.uid, 'quote:rejected', { quoteId: quote._id.toString() });
     notifyRequest(quote.requestId.toString(), 'quote:rejected', { quoteId: quote._id.toString() });
+    broadcastEvent('quote:status', { quoteId: quote._id.toString(), status: 'rejected' });
 
     sendPushNotification(quote.technicianId, {
       title: 'Presupuesto rechazado',
