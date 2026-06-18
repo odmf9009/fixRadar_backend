@@ -191,7 +191,10 @@ async function getNearbyRequests(req, res, next) {
 
 async function getMyRequests(req, res, next) {
   try {
-    const requests = await ServiceRequest.find({ clientId: req.uid })
+    const requests = await ServiceRequest.find({
+      clientId: req.uid,
+      status: { $nin: ['cancelled', 'completed'] }
+    })
       .sort({ createdAt: -1 })
       .lean();
     res.json(requests);
@@ -331,10 +334,15 @@ async function cancelRequest(req, res, next) {
     request.status = 'cancelled';
     await request.save();
 
-    // Notify assigned technician if any
-    if (request.technicianId) {
+    // Notify ALL technicians who sent proposals for this request
+    const quotes = await Quote.find({ requestId: request._id });
+
+    for (const quote of quotes) {
+      const techId = quote.technicianId;
+
+      // Create alert for the technician
       const alert = await Alert.create({
-        userId: request.technicianId,
+        userId: techId,
         requestId: request._id.toString(),
         requestTitle: `Pedido cancelado: ${request.title}`,
         requestImageUrl: request.imageUrls?.[0] || '',
@@ -342,7 +350,19 @@ async function cancelRequest(req, res, next) {
         distance: 0,
         type: 'system',
       });
-      notifyUser(request.technicianId, 'alert:new', alert.toObject());
+
+      // Notify via Socket
+      notifyUser(techId, 'alert:new', alert.toObject());
+
+      // Send Push Notification
+      sendPushNotification(techId, {
+        title: 'Pedido cancelado',
+        body: `❌ El pedido "${request.title}" ha sido cancelado por el cliente.`,
+        data: {
+          type: 'request_cancelled',
+          requestId: request._id.toString(),
+        },
+      });
     }
 
     await Quote.updateMany(
