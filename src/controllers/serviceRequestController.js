@@ -338,8 +338,8 @@ async function cancelRequest(req, res, next) {
     if (!request) return res.status(404).json({ error: 'Request not found' });
     if (request.clientId !== req.uid) return res.status(403).json({ error: 'Forbidden' });
 
-    request.status = 'cancelled';
-    await request.save();
+    // Use updateOne to ensure the status is changed in the DB directly
+    await ServiceRequest.updateOne({ _id: request._id }, { status: 'cancelled' });
 
     // Notify ALL technicians who sent proposals for this request
     const quotes = await Quote.find({ requestId: request._id });
@@ -377,8 +377,13 @@ async function cancelRequest(req, res, next) {
       { status: 'cancelled' }
     );
 
+    // Notify the client specifically to trigger UI refresh
+    notifyUser(req.uid, 'request:cancelled', { requestId: request._id.toString() });
+
+    // Broadcast status change
     notifyRequest(request._id.toString(), 'request:cancelled', { requestId: request._id.toString() });
     broadcastEvent('request:status', { requestId: request._id.toString(), status: 'cancelled' });
+    broadcastEvent('request:cancelled', { requestId: request._id.toString() });
 
     res.json({ success: true });
   } catch (err) {
