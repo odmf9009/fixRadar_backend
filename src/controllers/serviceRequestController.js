@@ -197,7 +197,14 @@ async function getMyRequests(req, res, next) {
     })
       .sort({ createdAt: -1 })
       .lean();
-    res.json(requests);
+
+    // Add a check to ensure we are returning the _id as id for the frontend if needed
+    const formattedRequests = requests.map(r => ({
+      ...r,
+      id: r._id.toString()
+    }));
+
+    res.json(formattedRequests);
   } catch (err) {
     next(err);
   }
