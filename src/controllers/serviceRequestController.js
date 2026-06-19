@@ -478,8 +478,18 @@ async function finishWorkByTechnician(req, res, next) {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
-    request.status = 'finishedByTechnician';
+    // Set status to completed as requested
+    request.status = 'completed';
+    request.completedAt = new Date();
     await request.save();
+
+    // Also update the quote status to completed if exists
+    if (request.acceptedQuoteId) {
+      await Quote.findByIdAndUpdate(request.acceptedQuoteId, {
+        status: 'completed',
+        statusUpdatedAt: new Date()
+      });
+    }
 
     // Notify client
     const alert = await Alert.create({
@@ -494,9 +504,15 @@ async function finishWorkByTechnician(req, res, next) {
 
     notifyUser(request.clientId, 'request:status', {
       requestId: request._id.toString(),
-      status: 'finishedByTechnician',
+      status: 'completed',
       alert: alert.toObject()
     });
+
+    res.json({ message: 'Work finished successfully', status: 'completed' });
+  } catch (err) {
+    next(err);
+  }
+}
 
     sendPushNotification(request.clientId, {
       title: 'Trabajo finalizado',
