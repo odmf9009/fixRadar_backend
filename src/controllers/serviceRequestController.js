@@ -441,14 +441,67 @@ async function getAvailableRequests(req, res, next) {
   }
 }
 
-// Completed/closed jobs where the logged-in technician was assigned
+// Jobs where the logged-in technician was assigned (active or finished)
+// OR jobs where the technician has sent a quote.
 async function getTechnicianHistory(req, res, next) {
   try {
+    // 1. Find all quotes by this technician to get the request IDs
+    const myQuotes = await Quote.find({ technicianId: req.uid }).select('requestId').lean();
+    const requestIdsFromQuotes = myQuotes.map(q => q.requestId);
+
+    // 2. Find requests where technician is assigned OR has a quote
     const requests = await ServiceRequest.find({
-      technicianId: req.uid,
-      status: { $in: ['completed', 'closed', 'cancelled'] },
+      $or: [
+        { technicianId: req.uid },
+        { _id: { $in: requestIdsFromQuotes } }
+      ]
     }).sort({ updatedAt: -1 }).lean();
+
     res.json(requests);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function finishWorkByTechnician(req, res, next) {
+  try {
+    const request = await ServiceRequest.findById(req.params.id);
+    if (!request) return res.status(404).json({ error: 'Request not found' });
+
+    if (request.technicianId !== req.uid) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    request.status = 'finishedByTechnician';
+    await request.save();
+
+    // Notify client
+    const alert = await Alert.create({
+      userId: request.clientId,
+      requestId: request._id.toString(),
+      requestTitle: `¡Trabajo finalizado! ${request.title}`,
+      requestImageUrl: request.imageUrls?.[0] || '',
+      address: request.address,
+      distance: 0,
+      type: 'system',
+    });
+
+    notifyUser(request.clientId, 'request:status', {
+      requestId: request._id.toString(),
+      status: 'finishedByTechnician',
+      alert: alert.toObject()
+    });
+
+    sendPushNotification(request.clientId, {
+      title: 'Trabajo finalizado',
+      body: `El técnico ha marcado tu trabajo "${request.title}" como finalizado. Por favor confírmalo.`,
+      data: {
+        type: 'request_finished',
+        requestId: request._id.toString(),
+      },
+    });
+
+    res.json({ success: true });
   } catch (err) {
     next(err);
   }
@@ -467,4 +520,5 @@ module.exports = {
   cancelRequest,
   markTechnicianInterested,
   hideRequest,
+  finishWorkByTechnician,
 };
