@@ -3,6 +3,7 @@ const User = require('../entities/User');
 const Quote = require('../entities/Quote');
 const Alert = require('../entities/Alert');
 const Activity = require('../entities/Activity');
+const mongoose = require('mongoose');
 const { notifyUser, notifyRequest, broadcastEvent } = require('../socket/socketManager');
 const { sendPushNotification } = require('../utils/notifications');
 
@@ -109,26 +110,38 @@ async function getAvailableRequests(req, res, next) {
 
 async function getTechnicianHistory(req, res, next) {
   try {
+    // 1. Find all requests where technician is explicitly assigned
+    const assignedRequests = await ServiceRequest.find({ technicianId: req.uid }).lean();
+
+    // 2. Find all requests where technician has sent a quote
     const myQuotes = await Quote.find({ technicianId: req.uid }).select('requestId').lean();
-    const requestIdsFromQuotes = myQuotes.map(q => q.requestId.toString());
+    const quotedRequestIds = myQuotes.map(q => {
+      try {
+        return new mongoose.Types.ObjectId(q.requestId);
+      } catch (e) {
+        return q.requestId;
+      }
+    });
 
-    const requests = await ServiceRequest.find({
-      $or: [
-        { technicianId: req.uid },
-        { _id: { $in: requestIdsFromQuotes } }
-      ]
-    }).sort({ updatedAt: -1 }).lean();
+    const quotedRequests = await ServiceRequest.find({
+      _id: { $in: quotedRequestIds },
+      technicianId: { $ne: req.uid } // Avoid duplicates from assignedRequests
+    }).lean();
 
-    const formatted = requests.map(r => ({
+    // Combine and format
+    const allRequests = [...assignedRequests, ...quotedRequests];
+
+    const formatted = allRequests.map(r => ({
       ...r,
       id: r._id.toString(),
       clientId: r.clientId ? r.clientId.toString() : '',
       technicianId: r.technicianId ? r.technicianId.toString() : null,
       acceptedQuoteId: r.acceptedQuoteId ? r.acceptedQuoteId.toString() : null
-    }));
+    })).sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
 
     res.json(formatted);
   } catch (err) {
+    console.error('[History] Error:', err);
     next(err);
   }
 }
