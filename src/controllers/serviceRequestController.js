@@ -28,135 +28,16 @@ async function createServiceRequest(req, res, next) {
       clientId: req.uid,
       clientName: user.username || user.name,
       clientPhotoUrl: user.profileImageUrl || null,
-      minBudget: minBudget || null,
-      maxBudget: maxBudget || null,
-      targetTechnicianId: targetTechnicianId || null,
+      minBudget,
+      maxBudget,
+      targetTechnicianId,
     });
 
-    await User.findByIdAndUpdate(req.uid, { $inc: { postsCount: 1 } });
-
-    await Activity.create({
-      userId: req.uid,
-      type: 'request_created',
-      title: 'Solicitud creada',
-      description: `Publicaste "${title}"`,
-      relatedId: request._id.toString(),
-      xpEarned: 50,
+    // Broadcast to nearby technicians
+    broadcastEvent('request:created', {
+      request: request.toObject(),
+      location: { latitude, longitude },
     });
-
-    // Notify targeted technician directly
-    if (targetTechnicianId) {
-      const alert = await Alert.create({
-        userId: targetTechnicianId,
-        requestId: request._id.toString(),
-        requestTitle: title,
-        requestImageUrl: imageUrls?.[0] || '',
-        address,
-        distance: 0,
-        type: 'directQuote',
-      });
-      notifyUser(targetTechnicianId, 'alert:new', alert.toObject());
-    }
-
-    // Notify the client specifically to trigger UI refresh
-    notifyUser(req.uid, 'request:created', request.toObject());
-
-    // Broadcast globally so all technicians can see the new request
-    broadcastEvent('request:created', request.toObject());
-
-    // Notify nearby technicians via Alerts (Radar)
-    try {
-      // Push goes to background users too — only skip if manually disabled
-      const nearbyTechs = await User.find({
-        $or: [{ role: 'technician' }, { userType: 'technician' }],
-        notificationsEnabled: { $ne: false },
-        specialties: { $in: [category, 'Handyman'] },
-        location: {
-          $near: {
-            $geometry: { type: 'Point', coordinates: [parseFloat(longitude), parseFloat(latitude)] },
-            $maxDistance: 80000, // ~50 miles — individual radius checked below
-          },
-        },
-      }).select('_id fcmToken notificationsEnabled serviceRadius workHours weekendAvailability location').limit(30);
-
-      // Returns true if current server time is within technician's work hours
-      const isWithinWorkHours = (workHours, weekendAvailability) => {
-        if (!workHours) return true;
-        const now = new Date();
-        const day = now.getDay(); // 0=Sun, 6=Sat
-        if ((day === 0 || day === 6) && !weekendAvailability) return false;
-        const parts = workHours.split(' - ');
-        if (parts.length !== 2) return true;
-        const parseTime = (s) => {
-          const m = s.trim().match(/^(\d+):(\d+)\s*(AM|PM)$/i);
-          if (!m) return null;
-          let h = parseInt(m[1]); const min = parseInt(m[2]); const p = m[3].toUpperCase();
-          if (p === 'PM' && h !== 12) h += 12;
-          if (p === 'AM' && h === 12) h = 0;
-          return h * 60 + min;
-        };
-        const start = parseTime(parts[0]); const end = parseTime(parts[1]);
-        if (start === null || end === null) return true;
-        const nowMin = now.getHours() * 60 + now.getMinutes();
-        return nowMin >= start && nowMin <= end;
-      };
-
-      // Haversine helper (meters)
-      const haversine = (lat1, lon1, lat2, lon2) => {
-        const R = 6371000;
-        const dLat = (lat2 - lat1) * Math.PI / 180;
-        const dLon = (lon2 - lon1) * Math.PI / 180;
-        const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
-        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      };
-
-      console.log(`[NearbyAlert] Found ${nearbyTechs.length} candidate techs for request in [${latitude}, ${longitude}]`);
-
-      for (const tech of nearbyTechs) {
-        if (tech._id.toString() === req.uid) continue;
-
-        // Skip technicians outside their configured work hours (only if explicitly set)
-        if (tech.workHours && tech.workHours !== '9:00 AM - 6:00 PM') {
-          if (!isWithinWorkHours(tech.workHours, tech.weekendAvailability)) {
-            console.log(`[NearbyAlert] Skip ${tech._id}: outside work hours (${tech.workHours})`);
-            continue;
-          }
-        }
-
-        // Respect each technician's individual service radius (stored in miles)
-        if (tech.location?.coordinates) {
-          const [tLon, tLat] = tech.location.coordinates;
-          const distMeters = haversine(parseFloat(latitude), parseFloat(longitude), tLat, tLon);
-          const techRadiusMeters = (tech.serviceRadius || 20) * 1609.34;
-          if (distMeters > techRadiusMeters) {
-            console.log(`[NearbyAlert] Skip ${tech._id}: distance ${Math.round(distMeters/1000)}km > radius ${tech.serviceRadius || 20} miles`);
-            continue;
-          }
-        }
-
-        const alert = await Alert.create({
-          userId: tech._id,
-          requestId: request._id.toString(),
-          requestTitle: `¡Nueva incidencia cerca! ${title}`,
-          requestImageUrl: imageUrls?.[0] || '',
-          address,
-          distance: 0,
-          type: 'nearby',
-        });
-        notifyUser(tech._id, 'alert:new', alert.toObject());
-
-        sendPushNotification(tech._id, {
-          title: '¡Nueva incidencia en tu área!',
-          body: `Se ha publicado un problema de ${category} cerca de tu zona.`,
-          data: {
-            type: 'nearby_request',
-            requestId: request._id.toString(),
-          },
-        });
-      }
-    } catch (e) {
-      console.error('[NearbyAlert] Error:', e);
-    }
 
     res.status(201).json(request);
   } catch (err) {
@@ -166,26 +47,22 @@ async function createServiceRequest(req, res, next) {
 
 async function getNearbyRequests(req, res, next) {
   try {
-    const { latitude, longitude, radius = 30, category, urgency } = req.query;
-    if (!latitude || !longitude) {
-      return res.status(400).json({ error: 'latitude and longitude are required' });
-    }
-
-    const filter = {
+    const { latitude, longitude, radius = 50000, category } = req.query;
+    const query = {
       status: 'open',
-      targetTechnicianId: null,
       location: {
         $near: {
           $geometry: { type: 'Point', coordinates: [parseFloat(longitude), parseFloat(latitude)] },
-          $maxDistance: parseFloat(radius) * 1000,
+          $maxDistance: parseInt(radius),
         },
       },
     };
 
-    if (category) filter.category = category;
-    if (urgency) filter.urgency = urgency;
+    if (category && category !== 'Todas') {
+      query.category = category;
+    }
 
-    const requests = await ServiceRequest.find(filter).limit(100).lean();
+    const requests = await ServiceRequest.find(query).limit(50).lean();
     res.json(requests);
   } catch (err) {
     next(err);
@@ -194,23 +71,10 @@ async function getNearbyRequests(req, res, next) {
 
 async function getMyRequests(req, res, next) {
   try {
-    // Return all requests for the client and let the frontend or status filter decide,
-    // but primarily we filter out cancelled/completed only if explicitly requested.
-    // To solve the "new problem not showing" issue, we revert to a broader find.
-    const requests = await ServiceRequest.find({
-      clientId: req.uid,
-      status: { $ne: 'deleted' }
-    })
+    const requests = await ServiceRequest.find({ clientId: req.uid })
       .sort({ createdAt: -1 })
       .lean();
-
-    // Map _id to id for consistency
-    const formatted = requests.map(r => ({
-      ...r,
-      id: r._id.toString()
-    }));
-
-    res.json(formatted);
+    res.json(requests);
   } catch (err) {
     next(err);
   }
@@ -228,11 +92,49 @@ async function getMyAssignedRequests(req, res, next) {
   }
 }
 
+async function getAvailableRequests(req, res, next) {
+  try {
+    const requests = await ServiceRequest.find({
+      status: 'open',
+      $or: [
+        { targetTechnicianId: null },
+        { targetTechnicianId: req.uid }
+      ]
+    }).sort({ createdAt: -1 }).limit(100).lean();
+    res.json(requests);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function getTechnicianHistory(req, res, next) {
+  try {
+    const myQuotes = await Quote.find({ technicianId: req.uid }).select('requestId').lean();
+    const requestIdsFromQuotes = myQuotes.map(q => q.requestId.toString());
+
+    const requests = await ServiceRequest.find({
+      $or: [
+        { technicianId: req.uid },
+        { _id: { $in: requestIdsFromQuotes } }
+      ]
+    }).sort({ updatedAt: -1 }).lean();
+
+    const formatted = requests.map(r => ({
+      ...r,
+      id: r._id.toString()
+    }));
+
+    res.json(formatted);
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function getRequestById(req, res, next) {
   try {
     const request = await ServiceRequest.findById(req.params.id).lean();
     if (!request) return res.status(404).json({ error: 'Request not found' });
-    res.json(request);
+    res.json({ ...request, id: request._id.toString() });
   } catch (err) {
     next(err);
   }
@@ -244,74 +146,19 @@ async function updateRequestStatus(req, res, next) {
     const request = await ServiceRequest.findById(req.params.id);
     if (!request) return res.status(404).json({ error: 'Request not found' });
 
-    const isClient = request.clientId === req.uid;
-    const isTechnician = request.technicianId === req.uid;
-
-    if (!isClient && !isTechnician) {
+    if (request.clientId !== req.uid && request.technicianId !== req.uid) {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
     request.status = status;
-    if (status === 'inProgress') request.assignedAt = new Date();
-    if (status === 'completed') request.completedAt = new Date();
     await request.save();
 
-    notifyRequest(request._id.toString(), 'request:status', {
-      requestId: request._id.toString(),
-      status,
-    });
-    broadcastEvent('request:status', { requestId: request._id.toString(), status });
-
-    if (isClient && request.technicianId) {
-      notifyUser(request.technicianId, 'request:status', {
+    const targetId = request.clientId === req.uid ? request.technicianId : request.clientId;
+    if (targetId) {
+      notifyUser(targetId, 'request:status', {
         requestId: request._id.toString(),
         status,
       });
-
-      // Alert for technician if client cancels or something
-      if (status === 'cancelled') {
-        const alert = await Alert.create({
-          userId: request.technicianId,
-          requestId: request._id.toString(),
-          requestTitle: `Pedido cancelado: ${request.title}`,
-          requestImageUrl: request.imageUrls?.[0] || '',
-          address: request.address,
-          distance: 0,
-          type: 'system',
-        });
-        notifyUser(request.technicianId, 'alert:new', alert.toObject());
-      }
-    }
-
-    if (isTechnician) {
-      notifyUser(request.clientId, 'request:status', {
-        requestId: request._id.toString(),
-        status,
-      });
-
-      // Alert for client if technician finishes or arrives
-      let alertTitle = '';
-      if (status === 'finishedByTechnician') alertTitle = 'El técnico terminó el trabajo';
-      if (status === 'inProgress') alertTitle = 'El técnico ha llegado al lugar';
-
-      if (alertTitle) {
-        const alert = await Alert.create({
-          userId: request.clientId,
-          requestId: request._id.toString(),
-          requestTitle: `${alertTitle}: ${request.title}`,
-          requestImageUrl: request.imageUrls?.[0] || '',
-          address: request.address,
-          distance: 0,
-          type: 'system',
-        });
-        notifyUser(request.clientId, 'alert:new', alert.toObject());
-
-        sendPushNotification(request.clientId, {
-          title: alertTitle,
-          body: `El técnico ha actualizado el estado de tu pedido: ${request.title}`,
-          data: { type: 'status_update', requestId: request._id.toString() },
-        });
-      }
     }
 
     res.json(request);
@@ -326,13 +173,8 @@ async function deleteRequest(req, res, next) {
     if (!request) return res.status(404).json({ error: 'Request not found' });
     if (request.clientId !== req.uid) return res.status(403).json({ error: 'Forbidden' });
 
-    await Quote.deleteMany({ requestId: request._id });
-    const requestIdStr = request._id.toString();
-    await request.deleteOne();
-
-    broadcastEvent('request:deleted', { requestId: requestIdStr });
-
-    res.json({ success: true });
+    await ServiceRequest.findByIdAndDelete(req.params.id);
+    res.json({ message: 'Request deleted' });
   } catch (err) {
     next(err);
   }
@@ -344,54 +186,17 @@ async function cancelRequest(req, res, next) {
     if (!request) return res.status(404).json({ error: 'Request not found' });
     if (request.clientId !== req.uid) return res.status(403).json({ error: 'Forbidden' });
 
-    // Use updateOne to ensure the status is changed in the DB directly
-    await ServiceRequest.updateOne({ _id: request._id }, { status: 'cancelled' });
+    request.status = 'cancelled';
+    await request.save();
 
-    // Notify ALL technicians who sent proposals for this request
-    const quotes = await Quote.find({ requestId: request._id });
-
-    for (const quote of quotes) {
-      const techId = quote.technicianId;
-
-      // Create alert for the technician
-      const alert = await Alert.create({
-        userId: techId,
+    if (request.technicianId) {
+      notifyUser(request.technicianId, 'request:status', {
         requestId: request._id.toString(),
-        requestTitle: `Pedido cancelado: ${request.title}`,
-        requestImageUrl: request.imageUrls?.[0] || '',
-        address: request.address,
-        distance: 0,
-        type: 'system',
-      });
-
-      // Notify via Socket
-      notifyUser(techId, 'alert:new', alert.toObject());
-
-      // Send Push Notification
-      sendPushNotification(techId, {
-        title: 'Pedido cancelado',
-        body: `❌ El pedido "${request.title}" ha sido cancelado por el cliente.`,
-        data: {
-          type: 'request_cancelled',
-          requestId: request._id.toString(),
-        },
+        status: 'cancelled',
       });
     }
 
-    await Quote.updateMany(
-      { requestId: request._id, status: 'pending' },
-      { status: 'cancelled' }
-    );
-
-    // Notify the client specifically to trigger UI refresh
-    notifyUser(req.uid, 'request:cancelled', { requestId: request._id.toString() });
-
-    // Broadcast status change
-    notifyRequest(request._id.toString(), 'request:cancelled', { requestId: request._id.toString() });
-    broadcastEvent('request:status', { requestId: request._id.toString(), status: 'cancelled' });
-    broadcastEvent('request:cancelled', { requestId: request._id.toString() });
-
-    res.json({ success: true });
+    res.json(request);
   } catch (err) {
     next(err);
   }
@@ -404,17 +209,11 @@ async function markTechnicianInterested(req, res, next) {
 
     if (!request.interestedTechnicians.includes(req.uid)) {
       request.interestedTechnicians.push(req.uid);
-      request.responsesCount += 1;
+      request.responsesCount = request.interestedTechnicians.length;
       await request.save();
     }
 
-    notifyUser(request.clientId, 'request:technician_interested', {
-      requestId: request._id.toString(),
-      technicianId: req.uid,
-      responsesCount: request.responsesCount,
-    });
-
-    res.json({ success: true, responsesCount: request.responsesCount });
+    res.json(request);
   } catch (err) {
     next(err);
   }
@@ -422,48 +221,7 @@ async function markTechnicianInterested(req, res, next) {
 
 async function hideRequest(req, res, next) {
   try {
-    // Tracks hidden requests client-side with shared_preferences
-    res.json({ success: true });
-  } catch (err) {
-    next(err);
-  }
-}
-
-// Open requests available for technicians to quote on
-async function getAvailableRequests(req, res, next) {
-  try {
-    const requests = await ServiceRequest.find({
-      status: { $in: ['open', 'pending'] },
-    }).sort({ createdAt: -1 }).lean();
-    res.json(requests);
-  } catch (err) {
-    next(err);
-  }
-}
-
-// Jobs where the logged-in technician was assigned (active or finished)
-// OR jobs where the technician has sent a quote.
-async function getTechnicianHistory(req, res, next) {
-  try {
-    // 1. Find all quotes by this technician to get the request IDs
-    const myQuotes = await Quote.find({ technicianId: req.uid }).select('requestId').lean();
-    const requestIdsFromQuotes = myQuotes.map(q => q.requestId.toString());
-
-    // 2. Find requests where technician is assigned OR has a quote
-    const requests = await ServiceRequest.find({
-      $or: [
-        { technicianId: req.uid },
-        { _id: { $in: requestIdsFromQuotes } }
-      ]
-    }).sort({ updatedAt: -1 }).lean();
-
-    // Map _id to id for consistency
-    const formatted = requests.map(r => ({
-      ...r,
-      id: r._id.toString()
-    }));
-
-    res.json(formatted);
+    res.json({ message: 'Request hidden locally' });
   } catch (err) {
     next(err);
   }
@@ -478,12 +236,10 @@ async function finishWorkByTechnician(req, res, next) {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
-    // Set status to completed as requested
     request.status = 'completed';
     request.completedAt = new Date();
     await request.save();
 
-    // Also update the quote status to completed if exists
     if (request.acceptedQuoteId) {
       await Quote.findByIdAndUpdate(request.acceptedQuoteId, {
         status: 'completed',
@@ -491,7 +247,6 @@ async function finishWorkByTechnician(req, res, next) {
       });
     }
 
-    // Notify client
     const alert = await Alert.create({
       userId: request.clientId,
       requestId: request._id.toString(),
@@ -508,22 +263,16 @@ async function finishWorkByTechnician(req, res, next) {
       alert: alert.toObject()
     });
 
-    res.json({ message: 'Work finished successfully', status: 'completed' });
-  } catch (err) {
-    next(err);
-  }
-}
-
     sendPushNotification(request.clientId, {
       title: 'Trabajo finalizado',
-      body: `El técnico ha marcado tu trabajo "${request.title}" como finalizado. Por favor confírmalo.`,
+      body: `El técnico ha marcado tu trabajo "${request.title}" como finalizado.`,
       data: {
         type: 'request_finished',
         requestId: request._id.toString(),
       },
     });
 
-    res.json({ success: true });
+    res.json({ message: 'Work finished successfully', status: 'completed' });
   } catch (err) {
     next(err);
   }
