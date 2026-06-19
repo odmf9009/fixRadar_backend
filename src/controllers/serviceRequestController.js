@@ -281,6 +281,59 @@ async function finishWorkByTechnician(req, res, next) {
   }
 }
 
+async function cancelAssignment(req, res, next) {
+  try {
+    const request = await ServiceRequest.findById(req.params.id);
+    if (!request) return res.status(404).json({ error: 'Request not found' });
+    if (request.clientId !== req.uid) return res.status(403).json({ error: 'Forbidden' });
+
+    const previousTechnicianId = request.technicianId;
+    const previousQuoteId = request.acceptedQuoteId;
+
+    // Reset request fields
+    request.status = 'open';
+    request.technicianId = null;
+    request.technicianName = null;
+    request.technicianPhotoUrl = null;
+    request.acceptedQuoteId = null;
+    request.assignedAt = null;
+    request.budget = null;
+    await request.save();
+
+    // Reset quote status so it can be accepted again or reconsidered
+    if (previousQuoteId) {
+      await Quote.findByIdAndUpdate(previousQuoteId, {
+        status: 'pending',
+        statusUpdatedAt: new Date()
+      });
+    }
+
+    // Notify technician that assignment was cancelled
+    if (previousTechnicianId) {
+      notifyUser(previousTechnicianId, 'request:status', {
+        requestId: request._id.toString(),
+        status: 'open',
+      });
+
+      await Alert.create({
+        userId: previousTechnicianId,
+        requestId: request._id.toString(),
+        requestTitle: `Asignación cancelada: ${request.title}`,
+        requestImageUrl: request.imageUrls?.[0] || '',
+        address: request.address,
+        distance: 0,
+        type: 'system',
+      });
+    }
+
+    notifyRequest(request._id.toString(), 'request:assigned', request.toObject());
+
+    res.json(request);
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   createServiceRequest,
   getNearbyRequests,
@@ -295,4 +348,5 @@ module.exports = {
   markTechnicianInterested,
   hideRequest,
   finishWorkByTechnician,
+  cancelAssignment,
 };

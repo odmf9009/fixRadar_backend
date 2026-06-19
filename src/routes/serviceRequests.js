@@ -11,6 +11,7 @@ router.post('/', authenticate, ctrl.createServiceRequest);
 router.get('/:id', authenticate, ctrl.getRequestById);
 router.put('/:id/status', authenticate, ctrl.updateRequestStatus);
 router.put('/:id/cancel', authenticate, ctrl.cancelRequest);
+router.put('/:id/cancel-assignment', authenticate, ctrl.cancelAssignment);
 router.put('/:id/finish', authenticate, ctrl.finishWorkByTechnician);
 router.delete('/:id', authenticate, ctrl.deleteRequest);
 router.post('/:id/interested', authenticate, ctrl.markTechnicianInterested);
