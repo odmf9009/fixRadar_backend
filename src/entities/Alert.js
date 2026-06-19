@@ -7,7 +7,7 @@ const alertSchema = new mongoose.Schema({
   requestImageUrl: { type: String, default: '' },
   address: { type: String, default: '' },
   distance: { type: Number, default: 0 },
-  type: { type: String, enum: ['nearby', 'directQuote', 'system'], default: 'nearby' },
+  type: { type: String, enum: ['nearby', 'directQuote', 'system', 'quoteReceived'], default: 'nearby' },
   isRead: { type: Boolean, default: false },
 }, {
   timestamps: true,
