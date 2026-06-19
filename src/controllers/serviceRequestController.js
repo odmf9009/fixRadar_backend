@@ -121,7 +121,10 @@ async function getTechnicianHistory(req, res, next) {
 
     const formatted = requests.map(r => ({
       ...r,
-      id: r._id.toString()
+      id: r._id.toString(),
+      clientId: r.clientId ? r.clientId.toString() : '',
+      technicianId: r.technicianId ? r.technicianId.toString() : null,
+      acceptedQuoteId: r.acceptedQuoteId ? r.acceptedQuoteId.toString() : null
     }));
 
     res.json(formatted);

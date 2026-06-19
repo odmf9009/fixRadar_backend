@@ -255,7 +255,15 @@ async function getQuotesForTechnician(req, res, next) {
     const quotes = await Quote.find({ technicianId: req.params.id })
       .sort({ createdAt: -1 })
       .lean();
-    res.json(quotes);
+
+    // Ensure all internal IDs are strings for the frontend
+    const formatted = quotes.map(q => ({
+      ...q,
+      id: q._id.toString(),
+      requestId: q.requestId.toString()
+    }));
+
+    res.json(formatted);
   } catch (err) {
     next(err);
   }
