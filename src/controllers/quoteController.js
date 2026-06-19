@@ -165,6 +165,7 @@ async function acceptQuote(req, res, next) {
     request.technicianId = quote.technicianId;
     request.technicianName = technician.username || technician.name;
     request.technicianPhotoUrl = technician.profileImageUrl || null;
+    request.budget = quote.price || quote.minPrice;
     request.acceptedQuoteId = quote._id;
     request.assignedAt = new Date();
     request.isChatEnabled = true;
