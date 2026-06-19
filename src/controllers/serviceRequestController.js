@@ -447,7 +447,7 @@ async function getTechnicianHistory(req, res, next) {
   try {
     // 1. Find all quotes by this technician to get the request IDs
     const myQuotes = await Quote.find({ technicianId: req.uid }).select('requestId').lean();
-    const requestIdsFromQuotes = myQuotes.map(q => q.requestId);
+    const requestIdsFromQuotes = myQuotes.map(q => q.requestId.toString());
 
     // 2. Find requests where technician is assigned OR has a quote
     const requests = await ServiceRequest.find({
@@ -457,7 +457,13 @@ async function getTechnicianHistory(req, res, next) {
       ]
     }).sort({ updatedAt: -1 }).lean();
 
-    res.json(requests);
+    // Map _id to id for consistency
+    const formatted = requests.map(r => ({
+      ...r,
+      id: r._id.toString()
+    }));
+
+    res.json(formatted);
   } catch (err) {
     next(err);
   }
