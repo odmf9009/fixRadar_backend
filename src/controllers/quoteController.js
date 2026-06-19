@@ -3,7 +3,7 @@ const ServiceRequest = require('../entities/ServiceRequest');
 const User = require('../entities/User');
 const Alert = require('../entities/Alert');
 const Activity = require('../entities/Activity');
-const { notifyUser, notifyRequest } = require('../socket/socketManager');
+const { notifyUser, notifyRequest, broadcastEvent } = require('../socket/socketManager');
 const { sendPushNotification } = require('../utils/notifications');
 
 async function sendQuote(req, res, next) {
