@@ -110,34 +110,39 @@ async function getAvailableRequests(req, res, next) {
 
 async function getTechnicianHistory(req, res, next) {
   try {
-    // 1. Find all requests where technician is explicitly assigned
-    const assignedRequests = await ServiceRequest.find({ technicianId: req.uid }).lean();
+    const uid = req.uid;
+    const mongoose = require('mongoose');
 
-    // 2. Find all requests where technician has sent a quote
-    const myQuotes = await Quote.find({ technicianId: req.uid }).select('requestId').lean();
-    const quotedRequestIds = myQuotes.map(q => {
-      try {
-        return new mongoose.Types.ObjectId(q.requestId);
-      } catch (e) {
-        return q.requestId;
-      }
-    });
+    // 1. Get all request IDs from quotes sent by this technician
+    const myQuotes = await Quote.find({ technicianId: uid }).select('requestId').lean();
+    const requestIdsFromQuotes = myQuotes.map(q => q.requestId.toString());
 
-    const quotedRequests = await ServiceRequest.find({
-      _id: { $in: quotedRequestIds },
-      technicianId: { $ne: req.uid } // Avoid duplicates from assignedRequests
-    }).lean();
+    // 2. Find all requests where the technician is either assigned OR has sent a quote
+    // We search technicianId as both String and potentially ObjectId if it was incorrectly cast
+    const uidObj = mongoose.isValidObjectId(uid) ? new mongoose.Types.ObjectId(uid) : null;
 
-    // Combine and format
-    const allRequests = [...assignedRequests, ...quotedRequests];
+    const orQuery = [
+      { technicianId: uid },
+      { interestedTechnicians: uid },
+      { _id: { $in: requestIdsFromQuotes } }
+    ];
 
-    const formatted = allRequests.map(r => ({
+    if (uidObj) {
+      orQuery.push({ technicianId: uidObj });
+      orQuery.push({ interestedTechnicians: uidObj });
+    }
+
+    const requests = await ServiceRequest.find({ $or: orQuery })
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    const formatted = requests.map(r => ({
       ...r,
       id: r._id.toString(),
       clientId: r.clientId ? r.clientId.toString() : '',
       technicianId: r.technicianId ? r.technicianId.toString() : null,
       acceptedQuoteId: r.acceptedQuoteId ? r.acceptedQuoteId.toString() : null
-    })).sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+    }));
 
     res.json(formatted);
   } catch (err) {

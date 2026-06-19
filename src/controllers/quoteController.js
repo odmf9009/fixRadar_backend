@@ -195,6 +195,13 @@ async function acceptQuote(req, res, next) {
       request: request.toObject(),
       alert: alert.toObject(),
     });
+
+    // Notify the client initiatior too
+    socketManager.notifyUser(req.uid, 'request:status', {
+      requestId: request._id.toString(),
+      status: 'assigned',
+    });
+
     socketManager.notifyRequest(request._id.toString(), 'request:assigned', request.toObject());
 
     res.json({ quote: quote.toObject(), request: request.toObject() });
