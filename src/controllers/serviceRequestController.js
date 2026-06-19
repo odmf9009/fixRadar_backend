@@ -169,6 +169,7 @@ async function updateRequestStatus(req, res, next) {
     request.status = status;
     await request.save();
 
+    // Notify the other party
     const targetId = request.clientId === req.uid ? request.technicianId : request.clientId;
     if (targetId) {
       notifyUser(targetId, 'request:status', {
@@ -176,6 +177,12 @@ async function updateRequestStatus(req, res, next) {
         status,
       });
     }
+
+    // Also notify the initiator so their local streams refresh
+    notifyUser(req.uid, 'request:status', {
+      requestId: request._id.toString(),
+      status,
+    });
 
     res.json(request);
   } catch (err) {
@@ -190,6 +197,12 @@ async function deleteRequest(req, res, next) {
     if (request.clientId !== req.uid) return res.status(403).json({ error: 'Forbidden' });
 
     await ServiceRequest.findByIdAndDelete(req.params.id);
+
+    // Notify the initiator so their local streams refresh
+    notifyUser(req.uid, 'request:deleted', {
+      requestId: req.params.id,
+    });
+
     res.json({ message: 'Request deleted' });
   } catch (err) {
     next(err);
@@ -211,6 +224,12 @@ async function cancelRequest(req, res, next) {
         status: 'cancelled',
       });
     }
+
+    // Also notify the client themselves so their UI refreshes
+    notifyUser(req.uid, 'request:status', {
+      requestId: request._id.toString(),
+      status: 'cancelled',
+    });
 
     res.json(request);
   } catch (err) {
@@ -338,6 +357,12 @@ async function cancelAssignment(req, res, next) {
         type: 'system',
       });
     }
+
+    // Notify the client themselves so their UI refreshes
+    notifyUser(req.uid, 'request:status', {
+      requestId: request._id.toString(),
+      status: 'open',
+    });
 
     notifyRequest(request._id.toString(), 'request:assigned', request.toObject());
 
