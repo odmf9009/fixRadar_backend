@@ -3,7 +3,7 @@ const ServiceRequest = require('../entities/ServiceRequest');
 const User = require('../entities/User');
 const Alert = require('../entities/Alert');
 const Activity = require('../entities/Activity');
-const { notifyUser, notifyRequest, broadcastEvent } = require('../socket/socketManager');
+const socketManager = require('../socket/socketManager');
 const { sendPushNotification } = require('../utils/notifications');
 
 async function sendQuote(req, res, next) {
@@ -64,11 +64,11 @@ async function sendQuote(req, res, next) {
       type: 'quoteReceived',
     });
 
-    notifyUser(request.clientId, 'quote:new', {
+    socketManager.notifyUser(request.clientId, 'quote:new', {
       quote: quote.toObject(),
       alert: alert.toObject(),
     });
-    notifyRequest(requestId, 'quote:new', quote.toObject());
+    socketManager.notifyRequest(requestId, 'quote:new', quote.toObject());
 
     // Send Push Notification
     sendPushNotification(request.clientId, {
@@ -190,12 +190,12 @@ async function acceptQuote(req, res, next) {
       type: 'system',
     });
 
-    notifyUser(quote.technicianId, 'quote:accepted', {
+    socketManager.notifyUser(quote.technicianId, 'quote:accepted', {
       quote: quote.toObject(),
       request: request.toObject(),
       alert: alert.toObject(),
     });
-    notifyRequest(request._id.toString(), 'request:assigned', request.toObject());
+    socketManager.notifyRequest(request._id.toString(), 'request:assigned', request.toObject());
 
     res.json({ quote: quote.toObject(), request: request.toObject() });
   } catch (err) {
@@ -226,13 +226,16 @@ async function rejectQuote(req, res, next) {
       type: 'system',
     });
 
-    notifyUser(quote.technicianId, 'quote:rejected', {
+    socketManager.notifyUser(quote.technicianId, 'quote:rejected', {
       quoteId: quote._id.toString(),
       alert: alert.toObject()
     });
-    notifyUser(req.uid, 'quote:rejected', { quoteId: quote._id.toString() });
-    notifyRequest(quote.requestId.toString(), 'quote:rejected', { quoteId: quote._id.toString() });
-    broadcastEvent('quote:status', { quoteId: quote._id.toString(), status: 'rejected' });
+    socketManager.notifyUser(req.uid, 'quote:rejected', { quoteId: quote._id.toString() });
+    socketManager.notifyRequest(quote.requestId.toString(), 'quote:rejected', { quoteId: quote._id.toString() });
+
+    if (socketManager.broadcastEvent) {
+      socketManager.broadcastEvent('quote:status', { quoteId: quote._id.toString(), status: 'rejected' });
+    }
 
     sendPushNotification(quote.technicianId, {
       title: 'Presupuesto rechazado',
