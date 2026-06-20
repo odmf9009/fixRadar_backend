@@ -67,10 +67,14 @@ function initSocket(server) {
 
     socket.on('chat:message', async (data) => {
       try {
-        const { requestId, text, imageUrl, latitude, longitude, type, senderName } = data;
+        const { requestId, quoteId, text, imageUrl, latitude, longitude, type, senderName } = data;
+
+        let recipientId = null;
+        let msgRequestId = requestId || null;
 
         const message = await ChatMessage.create({
-          requestId,
+          requestId: requestId || null,
+          quoteId: quoteId || null,
           senderId: uid,
           senderName: senderName || 'Usuario',
           text: text || '',
@@ -81,26 +85,46 @@ function initSocket(server) {
           readBy: [uid],
         });
 
-        const request = await ServiceRequest.findByIdAndUpdate(requestId, {
-          lastMessageAt: new Date(),
-          lastMessageBy: uid,
-          lastMessageText: text || (type === 'image' ? '📷 Imagen' : '📍 Ubicación'),
-        });
-
-        const recipientId = uid === request.clientId ? request.technicianId : request.clientId;
+        if (quoteId) {
+          const Quote = require('../entities/Quote');
+          const quote = await Quote.findById(quoteId);
+          if (quote) {
+            recipientId = uid === quote.clientId.toString() ? quote.technicianId : quote.clientId;
+            msgRequestId = quote.requestId;
+          }
+        } else if (requestId) {
+          const request = await ServiceRequest.findByIdAndUpdate(requestId, {
+            lastMessageAt: new Date(),
+            lastMessageBy: uid,
+            lastMessageText: text || (type === 'image' ? '📷 Imagen' : '📍 Ubicación'),
+          });
+          if (request) {
+            recipientId = uid === request.clientId ? request.technicianId : request.clientId;
+          }
+        }
 
         if (recipientId) {
           const { sendPushNotification } = require('../utils/notifications');
-          sendPushNotification(recipientId, {
+          sendPushNotification(recipientId.toString(), {
             title: `Mensaje de ${senderName || 'Usuario'}`,
             body: text || (type === 'image' ? '📷 Te envió una imagen' : '📍 Te envió una ubicación'),
-            data: { type: 'chat_message', requestId },
+            data: { type: 'chat_message', requestId: msgRequestId ? msgRequestId.toString() : (quoteId || '') },
+          });
+
+          // Notify recipient in-app for bell shake (if they're in foreground on another screen)
+          notifyUser(recipientId.toString(), 'chat:incoming', {
+            requestId: requestId || null,
+            quoteId: quoteId || null,
+            senderName: senderName || 'Usuario',
+            text: text || '...',
           });
         }
 
-        io.to(`chat:${requestId}`).emit('chat:message', {
+        const roomKey = quoteId ? `chat:quote:${quoteId}` : `chat:${requestId}`;
+        io.to(roomKey).emit('chat:message', {
           id: message._id.toString(),
-          requestId,
+          requestId: requestId || null,
+          quoteId: quoteId || null,
           senderId: uid,
           senderName: message.senderName,
           text: message.text,

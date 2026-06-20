@@ -1,5 +1,6 @@
 const ChatMessage = require('../entities/ChatMessage');
 const ServiceRequest = require('../entities/ServiceRequest');
+const Quote = require('../entities/Quote');
 
 async function getMessages(req, res, next) {
   try {
@@ -9,10 +10,38 @@ async function getMessages(req, res, next) {
     const request = await ServiceRequest.findById(requestId);
     if (!request) return res.status(404).json({ error: 'Request not found' });
 
-    const isParticipant = request.clientId === req.uid || request.technicianId === req.uid;
+    const myQuote = await Quote.findOne({ requestId, technicianId: req.uid });
+    const isParticipant = request.clientId === req.uid ||
+                          request.technicianId === req.uid ||
+                          myQuote != null;
     if (!isParticipant) return res.status(403).json({ error: 'Forbidden' });
 
-    const query = { requestId };
+    const query = { requestId, quoteId: null };
+    if (before) query.createdAt = { $lt: new Date(before) };
+
+    const messages = await ChatMessage.find(query)
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .lean();
+
+    res.json(messages.reverse());
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function getQuoteMessages(req, res, next) {
+  try {
+    const { quoteId } = req.params;
+    const { before, limit = 50 } = req.query;
+
+    const quote = await Quote.findById(quoteId);
+    if (!quote) return res.status(404).json({ error: 'Quote not found' });
+
+    const isParticipant = quote.clientId === req.uid || quote.technicianId === req.uid;
+    if (!isParticipant) return res.status(403).json({ error: 'Forbidden' });
+
+    const query = { quoteId };
     if (before) query.createdAt = { $lt: new Date(before) };
 
     const messages = await ChatMessage.find(query)
@@ -78,4 +107,4 @@ async function markRead(req, res, next) {
   }
 }
 
-module.exports = { getMessages, sendMessage, markRead };
+module.exports = { getMessages, getQuoteMessages, sendMessage, markRead };

@@ -2,6 +2,7 @@ const router = require('express').Router();
 const { authenticate } = require('../middleware/auth');
 const ctrl = require('../controllers/chatController');
 
+router.get('/quote/:quoteId/messages', authenticate, ctrl.getQuoteMessages);
 router.get('/:requestId/messages', authenticate, ctrl.getMessages);
 router.post('/:requestId/messages', authenticate, ctrl.sendMessage);
 router.put('/:requestId/read', authenticate, ctrl.markRead);

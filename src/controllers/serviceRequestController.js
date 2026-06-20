@@ -256,7 +256,7 @@ async function updateRequestStatus(req, res, next) {
 
       if (status === 'completed' && request.clientId === req.uid) {
         // Create an alert for the technician that the job was confirmed
-        await Alert.create({
+        const completedAlert = await Alert.create({
           userId: request.technicianId,
           requestId: request._id.toString(),
           requestTitle: `¡Pago/Trabajo confirmado! ${request.title}`,
@@ -265,6 +265,7 @@ async function updateRequestStatus(req, res, next) {
           distance: 0,
           type: 'system',
         });
+        notifyUser(request.technicianId, 'alert:new', completedAlert.toObject());
       }
     }
 
@@ -385,6 +386,7 @@ async function finishWorkByTechnician(req, res, next) {
       status: 'finishedByTechnician',
       alert: alert.toObject()
     });
+    notifyUser(request.clientId, 'alert:new', alert.toObject());
 
     // Notify Technician (Initiator) to update their UI
     notifyUser(req.uid, 'request:status', {
@@ -441,7 +443,7 @@ async function cancelAssignment(req, res, next) {
         status: 'open',
       });
 
-      await Alert.create({
+      const cancelAlert = await Alert.create({
         userId: previousTechnicianId,
         requestId: request._id.toString(),
         requestTitle: `Asignación cancelada: ${request.title}`,
@@ -450,6 +452,7 @@ async function cancelAssignment(req, res, next) {
         distance: 0,
         type: 'system',
       });
+      notifyUser(previousTechnicianId, 'alert:new', cancelAlert.toObject());
     }
 
     // Notify the client themselves so their UI refreshes

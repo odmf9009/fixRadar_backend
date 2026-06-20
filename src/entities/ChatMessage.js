@@ -1,7 +1,8 @@
 const mongoose = require('mongoose');
 
 const chatMessageSchema = new mongoose.Schema({
-  requestId: { type: mongoose.Schema.Types.ObjectId, ref: 'ServiceRequest', required: true },
+  requestId: { type: mongoose.Schema.Types.ObjectId, ref: 'ServiceRequest', required: false, default: null },
+  quoteId: { type: mongoose.Schema.Types.ObjectId, ref: 'Quote', required: false, default: null },
   senderId: { type: String, ref: 'User', required: true },
   senderName: { type: String, required: true },
   text: { type: String, default: '' },
@@ -15,6 +16,7 @@ const chatMessageSchema = new mongoose.Schema({
 });
 
 chatMessageSchema.index({ requestId: 1, createdAt: 1 });
+chatMessageSchema.index({ quoteId: 1, createdAt: 1 });
 chatMessageSchema.index({ senderId: 1 });
 
 module.exports = mongoose.model('ChatMessage', chatMessageSchema);

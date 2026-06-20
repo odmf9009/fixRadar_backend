@@ -68,6 +68,7 @@ async function sendQuote(req, res, next) {
       quote: quote.toObject(),
       alert: alert.toObject(),
     });
+    socketManager.notifyUser(request.clientId, 'alert:new', alert.toObject());
     socketManager.notifyRequest(requestId, 'quote:new', quote.toObject());
 
     // Send Push Notification
@@ -195,6 +196,7 @@ async function acceptQuote(req, res, next) {
       request: request.toObject(),
       alert: alert.toObject(),
     });
+    socketManager.notifyUser(quote.technicianId, 'alert:new', alert.toObject());
 
     // Notify the client initiatior too
     socketManager.notifyUser(req.uid, 'request:status', {
@@ -247,6 +249,7 @@ async function rejectQuote(req, res, next) {
       quoteId: quote._id.toString(),
       alert: alert.toObject()
     });
+    socketManager.notifyUser(quote.technicianId, 'alert:new', alert.toObject());
     socketManager.notifyUser(req.uid, 'quote:rejected', { quoteId: quote._id.toString() });
     socketManager.notifyRequest(quote.requestId.toString(), 'quote:rejected', { quoteId: quote._id.toString() });
 
