@@ -172,6 +172,17 @@ async function updateRequestStatus(req, res, next) {
     }
 
     request.status = status;
+
+    if (status === 'completed') {
+      request.completedAt = new Date();
+      if (request.acceptedQuoteId) {
+        await Quote.findByIdAndUpdate(request.acceptedQuoteId, {
+          status: 'completed',
+          statusUpdatedAt: new Date()
+        });
+      }
+    }
+
     await request.save();
 
     // Notify the other party
@@ -181,6 +192,19 @@ async function updateRequestStatus(req, res, next) {
         requestId: request._id.toString(),
         status,
       });
+
+      if (status === 'completed' && request.clientId === req.uid) {
+        // Create an alert for the technician that the job was confirmed
+        await Alert.create({
+          userId: request.technicianId,
+          requestId: request._id.toString(),
+          requestTitle: `¡Pago/Trabajo confirmado! ${request.title}`,
+          requestImageUrl: request.imageUrls?.[0] || '',
+          address: request.address,
+          distance: 0,
+          type: 'system',
+        });
+      }
     }
 
     // Also notify the initiator so their local streams refresh
@@ -276,43 +300,43 @@ async function finishWorkByTechnician(req, res, next) {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
-    request.status = 'completed';
-    request.completedAt = new Date();
+    // Move to 'finishedByTechnician' so client can confirm
+    request.status = 'finishedByTechnician';
     await request.save();
-
-    if (request.acceptedQuoteId) {
-      await Quote.findByIdAndUpdate(request.acceptedQuoteId, {
-        status: 'completed',
-        statusUpdatedAt: new Date()
-      });
-    }
 
     const alert = await Alert.create({
       userId: request.clientId,
       requestId: request._id.toString(),
-      requestTitle: `¡Trabajo finalizado! ${request.title}`,
+      requestTitle: `¡Trabajo terminado! ${request.title}`,
       requestImageUrl: request.imageUrls?.[0] || '',
       address: request.address,
       distance: 0,
       type: 'system',
     });
 
+    // Notify Client
     notifyUser(request.clientId, 'request:status', {
       requestId: request._id.toString(),
-      status: 'completed',
+      status: 'finishedByTechnician',
       alert: alert.toObject()
     });
 
+    // Notify Technician (Initiator) to update their UI
+    notifyUser(req.uid, 'request:status', {
+      requestId: request._id.toString(),
+      status: 'finishedByTechnician',
+    });
+
     sendPushNotification(request.clientId, {
-      title: 'Trabajo finalizado',
-      body: `El técnico ha marcado tu trabajo "${request.title}" como finalizado.`,
+      title: 'Trabajo terminado',
+      body: `El técnico ha terminado tu trabajo "${request.title}". Por favor, confírmalo en la app.`,
       data: {
         type: 'request_finished',
         requestId: request._id.toString(),
       },
     });
 
-    res.json({ message: 'Work finished successfully', status: 'completed' });
+    res.json({ message: 'Work marked as finished, awaiting client confirmation', status: 'finishedByTechnician' });
   } catch (err) {
     next(err);
   }
