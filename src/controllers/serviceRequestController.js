@@ -34,10 +34,71 @@ async function createServiceRequest(req, res, next) {
       targetTechnicianId,
     });
 
-    // Broadcast to nearby technicians
+    // Broadcast via socket to all connected clients (real-time update)
     broadcastEvent('request:created', {
       request: request.toObject(),
       location: { latitude, longitude },
+    });
+
+    // Send FCM push to nearby technicians who are offline (socket not connected)
+    // Search within 300km max and then filter by each technician's own serviceRadius
+    setImmediate(async () => {
+      try {
+        const { getIO } = require('../socket/socketManager');
+        const candidates = await User.find({
+          role: 'technician',
+          _id: { $ne: req.uid },
+          fcmToken: { $ne: null },
+          notificationsEnabled: true,
+          location: {
+            $near: {
+              $geometry: { type: 'Point', coordinates: [longitude, latitude] },
+              $maxDistance: 300000, // 300km broad search
+            },
+          },
+          // Specialty must match OR technician has 'Handyman' (all-categories)
+          $or: [
+            { specialties: category },
+            { specialties: 'Handyman' },
+          ],
+        }).select('_id fcmToken location serviceRadius');
+
+        const io = getIO();
+
+        for (const tech of candidates) {
+          // Skip technicians who have an active socket connection (they get the socket event)
+          try {
+            const sockets = await io.in(`user:${tech._id}`).fetchSockets();
+            if (sockets.length > 0) continue;
+          } catch (_) {}
+
+          // Check technician's own service radius (stored in miles → convert to meters)
+          const [techLng, techLat] = tech.location.coordinates;
+          const R = 6371000; // Earth radius in meters
+          const dLat = ((latitude - techLat) * Math.PI) / 180;
+          const dLng = ((longitude - techLng) * Math.PI) / 180;
+          const a =
+            Math.sin(dLat / 2) ** 2 +
+            Math.cos((techLat * Math.PI) / 180) *
+              Math.cos((latitude * Math.PI) / 180) *
+              Math.sin(dLng / 2) ** 2;
+          const distanceMeters = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+          const techRadiusMeters = (tech.serviceRadius || 20) * 1609.34; // miles → meters
+
+          if (distanceMeters <= techRadiusMeters) {
+            sendPushNotification(tech._id, {
+              title: '¡Nueva avería en tu zona!',
+              body: `${title} — ${address || category}`,
+              data: {
+                type: 'new_request',
+                requestId: request._id.toString(),
+              },
+            });
+          }
+        }
+      } catch (err) {
+        console.error('[Push] Error notifying nearby technicians:', err.message);
+      }
     });
 
     res.status(201).json(request);
