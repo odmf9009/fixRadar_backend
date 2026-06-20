@@ -29,9 +29,10 @@ app.use(express.urlencoded({ extended: true }));
 
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
-  max: parseInt(process.env.RATE_LIMIT_MAX) || 2000, // Increased from 1000 to 2000
+  max: parseInt(process.env.RATE_LIMIT_MAX) || 5000, // Increased from 2000 to 5000
   standardHeaders: true,
   legacyHeaders: false,
+  message: 'Too many requests, please try again later.',
 });
 app.use('/api/', limiter);
 
