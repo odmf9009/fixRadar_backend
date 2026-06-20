@@ -3,6 +3,17 @@ const User = require('../entities/User');
 
 async function sendPushNotification(userId, { title, body, data = {} }) {
   try {
+    // Skip FCM if user currently has the app open (active socket connection)
+    try {
+      const { getIO } = require('../socket/socketManager');
+      const io = getIO();
+      const sockets = await io.in(`user:${userId}`).fetchSockets();
+      if (sockets.length > 0) {
+        console.log(`[Push] Skip FCM for ${userId}: user is online via socket`);
+        return;
+      }
+    } catch (_) {}
+
     const user = await User.findById(userId).select('fcmToken notificationsEnabled');
 
     if (!user || !user.fcmToken || user.notificationsEnabled === false) {

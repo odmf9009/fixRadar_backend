@@ -204,6 +204,16 @@ async function acceptQuote(req, res, next) {
 
     socketManager.notifyRequest(request._id.toString(), 'request:assigned', request.toObject());
 
+    sendPushNotification(quote.technicianId, {
+      title: '¡Tu propuesta fue aceptada!',
+      body: `El cliente aceptó tu presupuesto para: ${request.title}`,
+      data: {
+        type: 'quote_accepted',
+        requestId: request._id.toString(),
+        quoteId: quote._id.toString(),
+      },
+    });
+
     res.json({ quote: quote.toObject(), request: request.toObject() });
   } catch (err) {
     next(err);
