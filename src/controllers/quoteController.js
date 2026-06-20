@@ -375,12 +375,48 @@ async function withdrawQuote(req, res, next) {
     quote.history.push({ action: 'cancelled', by: req.uid, message: 'Withdrawn by technician' });
     await quote.save();
 
-    await ServiceRequest.findByIdAndUpdate(quote.requestId, {
-      $pull: { interestedTechnicians: req.uid },
+    const request = await ServiceRequest.findByIdAndUpdate(
+      quote.requestId,
+      { $pull: { interestedTechnicians: req.uid }, $inc: { responsesCount: -1 } },
+      { new: true }
+    );
+
+    const techName = quote.technicianName || 'El profesional';
+    const reqTitle = request?.title || 'tu solicitud';
+
+    // Alerta (campana) para el cliente avisando que el profesional retiró su cotización.
+    const alert = await Alert.create({
+      userId: quote.clientId,
+      requestId: quote.requestId.toString(),
+      requestTitle: `${techName} ha retirado su cotización para: ${reqTitle}`,
+      requestImageUrl: request?.imageUrls?.[0] || '',
+      address: request?.address || '',
+      distance: 0,
+      type: 'system',
     });
 
-    socketManager.notifyUser(quote.clientId, 'quote:withdrawn', { quoteId: quote._id.toString() });
-    socketManager.notifyRequest(quote.requestId.toString(), 'quote:withdrawn', { quoteId: quote._id.toString() });
+    const withdrawPayload = {
+      quoteId: quote._id.toString(),
+      status: 'cancelled',
+      requestId: quote.requestId.toString(),
+    };
+    socketManager.notifyUser(quote.clientId, 'quote:withdrawn', { ...withdrawPayload, alert: alert.toObject() });
+    socketManager.notifyUser(quote.clientId, 'alert:new', alert.toObject());
+    socketManager.notifyRequest(quote.requestId.toString(), 'quote:withdrawn', withdrawPayload);
+    if (socketManager.broadcastEvent) {
+      socketManager.broadcastEvent('quote:status', withdrawPayload);
+    }
+
+    // FCM al cliente: el profesional retiró su cotización.
+    sendPushNotification(quote.clientId, {
+      title: 'Cotización retirada',
+      body: `${techName} ha retirado su cotización para: ${reqTitle}`,
+      data: {
+        type: 'quote_withdrawn',
+        requestId: quote.requestId.toString(),
+        quoteId: quote._id.toString(),
+      },
+    });
 
     res.json({ success: true });
   } catch (err) {
