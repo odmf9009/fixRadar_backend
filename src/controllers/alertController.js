@@ -45,9 +45,11 @@ async function getUnreadCount(req, res, next) {
 
 async function clearAllAlerts(req, res, next) {
   try {
-    await Alert.deleteMany({ userId: req.uid });
+    const result = await Alert.deleteMany({ userId: req.uid });
+    console.log(`[Alerts] Cleared ${result.deletedCount} alerts for user ${req.uid}`);
+
     notifyUser(req.uid, 'alerts:cleared', {});
-    res.json({ success: true });
+    res.json({ success: true, deletedCount: result.deletedCount });
   } catch (err) {
     next(err);
   }
