@@ -230,15 +230,22 @@ async function rejectQuote(req, res, next) {
     const request = await ServiceRequest.findById(quote.requestId);
     if (!request || request.clientId !== req.uid) return res.status(403).json({ error: 'Forbidden' });
 
-    quote.status = 'rejected';
+    // If the technician had already sent a counter-offer, a second rejection is
+    // definitive — no further counter-offers are allowed.
+    const isFinal = quote.status === 'counter_offer_sent';
+    const newStatus = isFinal ? 'final_rejected' : 'rejected';
+
+    quote.status = newStatus;
     quote.statusUpdatedAt = new Date();
-    quote.history.push({ action: 'rejected', by: req.uid, message: req.body.reason || '' });
+    quote.history.push({ action: newStatus, by: req.uid, message: req.body.reason || '' });
     await quote.save();
 
     const alert = await Alert.create({
       userId: quote.technicianId,
       requestId: request._id.toString(),
-      requestTitle: `Presupuesto rechazado: ${request.title}`,
+      requestTitle: isFinal
+        ? `Rechazo definitivo: ${request.title}`
+        : `Presupuesto rechazado: ${request.title}`,
       requestImageUrl: request.imageUrls?.[0] || '',
       address: request.address,
       distance: 0,
@@ -247,26 +254,153 @@ async function rejectQuote(req, res, next) {
 
     socketManager.notifyUser(quote.technicianId, 'quote:rejected', {
       quoteId: quote._id.toString(),
+      status: newStatus,
       alert: alert.toObject()
     });
     socketManager.notifyUser(quote.technicianId, 'alert:new', alert.toObject());
-    socketManager.notifyUser(req.uid, 'quote:rejected', { quoteId: quote._id.toString() });
-    socketManager.notifyRequest(quote.requestId.toString(), 'quote:rejected', { quoteId: quote._id.toString() });
+    socketManager.notifyUser(req.uid, 'quote:rejected', { quoteId: quote._id.toString(), status: newStatus });
+    socketManager.notifyRequest(quote.requestId.toString(), 'quote:rejected', { quoteId: quote._id.toString(), status: newStatus });
 
     if (socketManager.broadcastEvent) {
-      socketManager.broadcastEvent('quote:status', { quoteId: quote._id.toString(), status: 'rejected' });
+      socketManager.broadcastEvent('quote:status', { quoteId: quote._id.toString(), status: newStatus });
     }
 
     sendPushNotification(quote.technicianId, {
-      title: 'Presupuesto rechazado',
-      body: `El cliente ha rechazado tu propuesta para: ${request.title}`,
+      title: isFinal ? 'Rechazo definitivo' : 'Presupuesto rechazado',
+      body: isFinal
+        ? `El cliente rechazó definitivamente tu propuesta para: ${request.title}`
+        : `El cliente ha rechazado tu propuesta para: ${request.title}. Puedes enviar una contraoferta.`,
       data: {
         type: 'quote_rejected',
         requestId: request._id.toString(),
       },
     });
 
+    res.json({ success: true, status: newStatus });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// Technician sends a counter-offer after the client rejected the original quote.
+// Updates the existing quote with new pricing and flips status to
+// 'counter_offer_sent' so it reappears in the client's active quote list.
+async function counterOffer(req, res, next) {
+  try {
+    const { minPrice, maxPrice, message, estimatedTime } = req.body;
+
+    const quote = await Quote.findById(req.params.id);
+    if (!quote) return res.status(404).json({ error: 'Quote not found' });
+
+    // Only the technician who owns the quote may counter-offer.
+    if (quote.technicianId !== req.uid) return res.status(403).json({ error: 'Forbidden' });
+
+    // Counter-offers are only allowed after a (non-final) rejection.
+    if (quote.status !== 'rejected') {
+      return res.status(400).json({ error: 'A counter-offer can only be sent after the client rejects your quote' });
+    }
+
+    const request = await ServiceRequest.findById(quote.requestId);
+    if (!request) return res.status(404).json({ error: 'Request not found' });
+    if (request.status !== 'open' && request.status !== 'assigned') {
+      return res.status(400).json({ error: 'Request is no longer accepting quotes' });
+    }
+
+    const newMin = minPrice != null ? minPrice : quote.minPrice;
+    const newMax = maxPrice != null ? maxPrice : quote.maxPrice;
+
+    quote.minPrice = newMin;
+    quote.maxPrice = newMax;
+    quote.price = newMin;
+    if (message != null) quote.message = message;
+    if (estimatedTime != null) quote.estimatedTime = estimatedTime;
+    quote.status = 'counter_offer_sent';
+    quote.statusUpdatedAt = new Date();
+    quote.history.push({ action: 'counter_offer_sent', price: newMin, message: message || '', by: req.uid });
+    await quote.save();
+
+    await Activity.create({
+      userId: req.uid,
+      type: 'quote_sent',
+      title: 'Contraoferta enviada',
+      description: `Enviaste una contraoferta para "${request.title}"`,
+      relatedId: quote._id.toString(),
+      xpEarned: 10,
+    });
+
+    // Alert the client — reuse 'quoteReceived' so it surfaces like a fresh quote.
+    const alert = await Alert.create({
+      userId: request.clientId,
+      requestId: request._id.toString(),
+      requestTitle: `${quote.technicianName} te ha enviado una contraoferta para: ${request.title}`,
+      requestImageUrl: request.imageUrls?.[0] || '',
+      address: request.address,
+      distance: 0,
+      type: 'quoteReceived',
+    });
+
+    socketManager.notifyUser(request.clientId, 'quote:counter_offer', {
+      quote: quote.toObject(),
+      alert: alert.toObject(),
+    });
+    socketManager.notifyUser(request.clientId, 'alert:new', alert.toObject());
+    socketManager.notifyUser(req.uid, 'quote:counter_offer', { quote: quote.toObject() });
+    socketManager.notifyRequest(quote.requestId.toString(), 'quote:counter_offer', quote.toObject());
+
+    sendPushNotification(request.clientId, {
+      title: '🔄 Nueva contraoferta',
+      body: `${quote.technicianName} ha enviado una contraoferta para: ${request.title}`,
+      data: {
+        type: 'quote_counter_offer',
+        requestId: request._id.toString(),
+        quoteId: quote._id.toString(),
+      },
+    });
+
+    res.json(quote.toObject());
+  } catch (err) {
+    next(err);
+  }
+}
+
+// Technician withdraws their own quote.
+async function withdrawQuote(req, res, next) {
+  try {
+    const quote = await Quote.findById(req.params.id);
+    if (!quote) return res.status(404).json({ error: 'Quote not found' });
+    if (quote.technicianId !== req.uid) return res.status(403).json({ error: 'Forbidden' });
+
+    quote.status = 'cancelled';
+    quote.statusUpdatedAt = new Date();
+    quote.history.push({ action: 'cancelled', by: req.uid, message: 'Withdrawn by technician' });
+    await quote.save();
+
+    await ServiceRequest.findByIdAndUpdate(quote.requestId, {
+      $pull: { interestedTechnicians: req.uid },
+    });
+
+    socketManager.notifyUser(quote.clientId, 'quote:withdrawn', { quoteId: quote._id.toString() });
+    socketManager.notifyRequest(quote.requestId.toString(), 'quote:withdrawn', { quoteId: quote._id.toString() });
+
     res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function getQuoteById(req, res, next) {
+  try {
+    const quote = await Quote.findById(req.params.id).lean();
+    if (!quote) return res.status(404).json({ error: 'Quote not found' });
+
+    const isParticipant = quote.clientId === req.uid || quote.technicianId === req.uid;
+    if (!isParticipant) return res.status(403).json({ error: 'Forbidden' });
+
+    res.json({
+      ...quote,
+      id: quote._id.toString(),
+      requestId: quote.requestId.toString(),
+    });
   } catch (err) {
     next(err);
   }
@@ -298,6 +432,9 @@ module.exports = {
   getMyQuotes,
   getQuotesForClient,
   getQuotesForTechnician,
+  getQuoteById,
   acceptQuote,
-  rejectQuote
+  rejectQuote,
+  counterOffer,
+  withdrawQuote
 };
