@@ -16,6 +16,11 @@ const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
 
+// La app corre detrás de nginx (proxy en localhost). Sin esto, el header
+// X-Forwarded-For hace fallar a express-rate-limit (ERR_ERL_UNEXPECTED_X_FORWARDED_FOR)
+// y el rate-limit no identifica bien las IPs de los clientes.
+app.set('trust proxy', 1);
+
 const corsOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',')
   : ['http://localhost:3000'];
