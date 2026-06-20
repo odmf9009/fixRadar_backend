@@ -60,6 +60,34 @@ async function sendPushNotification(userId, { title, body, data = {} }) {
     console.log(`[Push] Sent to ${userId}: ${response}`);
     return response;
   } catch (error) {
+    const code = error?.errorInfo?.code || error?.code;
+
+    // Token inválido/no registrado: limpiar para no reintentar siempre.
+    if (
+      code === 'messaging/registration-token-not-registered' ||
+      code === 'messaging/invalid-registration-token' ||
+      code === 'messaging/invalid-argument'
+    ) {
+      console.warn(`[Push] Token inválido para ${userId} (${code}). Limpiando fcmToken.`);
+      try {
+        await User.findByIdAndUpdate(userId, { $unset: { fcmToken: 1 } });
+      } catch (_) {}
+      return;
+    }
+
+    // Credenciales del service account rechazadas por Google.
+    if (code === 'app/invalid-credential' || code === 'messaging/authentication-error') {
+      console.error(
+        `[Push] ❌ Credencial de Firebase rechazada (${code}). ` +
+          'Causas probables: (1) la hora del servidor está desincronizada ' +
+          `(ahora UTC: ${new Date().toISOString()}) → sincroniza NTP; o ` +
+          '(2) la service account key fue revocada/regenerada → actualiza ' +
+          'FIREBASE_PRIVATE_KEY/FIREBASE_PRIVATE_KEY_ID en el .env. ' +
+          'Ningún push se enviará hasta corregirlo.'
+      );
+      return;
+    }
+
     console.error(`[Push] Error sending to ${userId}:`, error);
   }
 }
