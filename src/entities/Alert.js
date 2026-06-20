@@ -3,11 +3,12 @@ const mongoose = require('mongoose');
 const alertSchema = new mongoose.Schema({
   userId: { type: String, ref: 'User', required: true },
   requestId: { type: String, required: true },
+  quoteId: { type: String, default: null },
   requestTitle: { type: String, required: true },
   requestImageUrl: { type: String, default: '' },
   address: { type: String, default: '' },
   distance: { type: Number, default: 0 },
-  type: { type: String, enum: ['nearby', 'directQuote', 'system', 'quoteReceived'], default: 'nearby' },
+  type: { type: String, enum: ['nearby', 'directQuote', 'system', 'quoteReceived', 'message'], default: 'nearby' },
   isRead: { type: Boolean, default: false },
 }, {
   timestamps: true,

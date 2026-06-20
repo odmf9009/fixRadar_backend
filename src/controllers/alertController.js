@@ -19,6 +19,7 @@ async function markAlertRead(req, res, next) {
       { _id: req.params.id, userId: req.uid },
       { isRead: true }
     );
+    notifyUser(req.uid, 'alerts:refresh', {});
     res.json({ success: true });
   } catch (err) {
     next(err);
@@ -28,6 +29,33 @@ async function markAlertRead(req, res, next) {
 async function markAllAlertsRead(req, res, next) {
   try {
     await Alert.updateMany({ userId: req.uid, isRead: false }, { isRead: true });
+    notifyUser(req.uid, 'alerts:refresh', {});
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// Marca como leída la alerta (campana) de una conversación de chat.
+// Una conversación se identifica por requestId + quoteId (quoteId opcional).
+async function markConversationRead(req, res, next) {
+  try {
+    const { requestId, quoteId } = req.body;
+    const filter = {
+      userId: req.uid,
+      type: 'message',
+      isRead: false,
+    };
+    if (quoteId) {
+      filter.quoteId = quoteId;
+    } else if (requestId) {
+      filter.requestId = requestId;
+      filter.quoteId = null;
+    } else {
+      return res.json({ success: true });
+    }
+    await Alert.updateMany(filter, { isRead: true });
+    notifyUser(req.uid, 'alerts:refresh', {});
     res.json({ success: true });
   } catch (err) {
     next(err);
@@ -55,4 +83,4 @@ async function clearAllAlerts(req, res, next) {
   }
 }
 
-module.exports = { getMyAlerts, markAlertRead, markAllAlertsRead, getUnreadCount, clearAllAlerts };
+module.exports = { getMyAlerts, markAlertRead, markAllAlertsRead, markConversationRead, getUnreadCount, clearAllAlerts };

@@ -130,6 +130,32 @@ function initSocket(server) {
             senderName: senderName || 'Usuario',
             text: text || '...',
           });
+
+          // Campana: UNA alerta por conversación (se actualiza, no se duplica).
+          // Se marca leída cuando el destinatario abre ese chat.
+          try {
+            const preview = text || (type === 'image' ? '📷 Imagen' : '📍 Ubicación');
+            const convFilter = {
+              userId: recipientId.toString(),
+              type: 'message',
+              requestId: msgRequestId ? msgRequestId.toString() : null,
+              quoteId: quoteId || null,
+            };
+            const msgAlert = await Alert.findOneAndUpdate(
+              convFilter,
+              {
+                requestTitle: `${senderName || 'Mensaje'}: ${preview}`,
+                requestImageUrl: '',
+                address: '',
+                distance: 0,
+                isRead: false,
+              },
+              { upsert: true, new: true, setDefaultsOnInsert: true }
+            );
+            notifyUser(recipientId.toString(), 'alert:new', msgAlert.toObject());
+          } catch (e) {
+            console.error('[Alert] message alert error:', e.message);
+          }
         }
 
         const roomKey = quoteId ? `chat:quote:${quoteId}` : `chat:${requestId}`;

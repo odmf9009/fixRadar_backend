@@ -40,15 +40,36 @@ async function createServiceRequest(req, res, next) {
       location: { latitude, longitude },
     });
 
-    // Send FCM push to nearby technicians who are offline (socket not connected)
-    // Search within 300km max and then filter by each technician's own serviceRadius
+    // Notificar a técnicos: crea Alert (campana, online y offline) + FCM (se
+    // auto-omite si el técnico tiene la app en primer plano).
     setImmediate(async () => {
       try {
-        const { getIO } = require('../socket/socketManager');
+        // Caso 1: solicitud DIRIGIDA a un técnico concreto (cotización directa).
+        // Notificar SOLO a ese técnico, sin difundir a toda la zona.
+        if (targetTechnicianId) {
+          const directAlert = await Alert.create({
+            userId: targetTechnicianId.toString(),
+            requestId: request._id.toString(),
+            requestTitle: `${user.name || user.username} te solicitó una cotización: ${title}`,
+            requestImageUrl: (imageUrls && imageUrls[0]) || '',
+            address: address || '',
+            distance: 0,
+            type: 'directQuote',
+          });
+          notifyUser(targetTechnicianId.toString(), 'alert:new', directAlert.toObject());
+          sendPushNotification(targetTechnicianId.toString(), {
+            title: 'Solicitud de cotización',
+            body: `${user.name || user.username} te solicitó una cotización: ${title}`,
+            data: { type: 'directQuote', requestId: request._id.toString() },
+          });
+          return;
+        }
+
+        // Caso 2: difusión por zona — técnicos cuya especialidad coincide
+        // (o 'Handyman') y que tienen la avería dentro de su radio de servicio.
         const candidates = await User.find({
           role: 'technician',
           _id: { $ne: req.uid },
-          fcmToken: { $ne: null },
           notificationsEnabled: true,
           location: {
             $near: {
@@ -61,17 +82,9 @@ async function createServiceRequest(req, res, next) {
             { specialties: category },
             { specialties: 'Handyman' },
           ],
-        }).select('_id fcmToken location serviceRadius');
-
-        const io = getIO();
+        }).select('_id location serviceRadius');
 
         for (const tech of candidates) {
-          // Skip technicians who have an active socket connection (they get the socket event)
-          try {
-            const sockets = await io.in(`user:${tech._id}`).fetchSockets();
-            if (sockets.length > 0) continue;
-          } catch (_) {}
-
           // Check technician's own service radius (stored in miles → convert to meters)
           const [techLng, techLat] = tech.location.coordinates;
           const R = 6371000; // Earth radius in meters
@@ -86,7 +99,19 @@ async function createServiceRequest(req, res, next) {
           const techRadiusMeters = (tech.serviceRadius || 20) * 1609.34; // miles → meters
 
           if (distanceMeters <= techRadiusMeters) {
-            sendPushNotification(tech._id, {
+            // Alerta in-app (campana) para todos los que coinciden.
+            const nearbyAlert = await Alert.create({
+              userId: tech._id.toString(),
+              requestId: request._id.toString(),
+              requestTitle: title,
+              requestImageUrl: (imageUrls && imageUrls[0]) || '',
+              address: address || '',
+              distance: distanceMeters,
+              type: 'nearby',
+            });
+            notifyUser(tech._id.toString(), 'alert:new', nearbyAlert.toObject());
+            // FCM (se auto-omite si está en primer plano o no tiene token).
+            sendPushNotification(tech._id.toString(), {
               title: '¡Nueva avería en tu zona!',
               body: `${title} — ${address || category}`,
               data: {
