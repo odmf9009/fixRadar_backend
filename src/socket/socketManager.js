@@ -55,6 +55,14 @@ function initSocket(server) {
     // Join personal room for targeted notifications
     socket.join(`user:${uid}`);
 
+    // Estado de la app: por defecto el socket nace en primer plano.
+    // El cliente lo actualiza con 'app:state' al pasar a segundo plano.
+    // Esto decide si enviamos FCM (solo cuando NO está en primer plano).
+    socket.data.foreground = true;
+    socket.on('app:state', (state) => {
+      socket.data.foreground = state === 'foreground';
+    });
+
     // --- CHAT EVENTS ---
 
     socket.on('chat:join', (requestId) => {
@@ -108,7 +116,11 @@ function initSocket(server) {
           sendPushNotification(recipientId.toString(), {
             title: `Mensaje de ${senderName || 'Usuario'}`,
             body: text || (type === 'image' ? '📷 Te envió una imagen' : '📍 Te envió una ubicación'),
-            data: { type: 'chat_message', requestId: msgRequestId ? msgRequestId.toString() : (quoteId || '') },
+            data: {
+              type: 'chat_message',
+              requestId: msgRequestId ? msgRequestId.toString() : '',
+              quoteId: quoteId || '',
+            },
           });
 
           // Notify recipient in-app for bell shake (if they're in foreground on another screen)

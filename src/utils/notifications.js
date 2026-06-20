@@ -3,13 +3,19 @@ const User = require('../entities/User');
 
 async function sendPushNotification(userId, { title, body, data = {} }) {
   try {
-    // Skip FCM if user currently has the app open (active socket connection)
+    // Skip FCM only if the user has the app in FOREGROUND (visible).
+    // Un socket conectado NO basta: las apps en segundo plano mantienen
+    // el socket vivo, y ahí sí necesitamos el push. El cliente reporta su
+    // estado con el evento 'app:state' (socket.data.foreground).
     try {
       const { getIO } = require('../socket/socketManager');
       const io = getIO();
       const sockets = await io.in(`user:${userId}`).fetchSockets();
-      if (sockets.length > 0) {
-        console.log(`[Push] Skip FCM for ${userId}: user is online via socket`);
+      const hasForegroundSocket = sockets.some(
+        (s) => s.data && s.data.foreground === true
+      );
+      if (hasForegroundSocket) {
+        console.log(`[Push] Skip FCM for ${userId}: app en primer plano`);
         return;
       }
     } catch (_) {}
