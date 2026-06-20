@@ -293,6 +293,7 @@ async function hideRequest(req, res, next) {
 
 async function finishWorkByTechnician(req, res, next) {
   try {
+    const { completionPhotoUrl } = req.body;
     const request = await ServiceRequest.findById(req.params.id);
     if (!request) return res.status(404).json({ error: 'Request not found' });
 
@@ -302,6 +303,9 @@ async function finishWorkByTechnician(req, res, next) {
 
     // Move to 'finishedByTechnician' so client can confirm
     request.status = 'finishedByTechnician';
+    if (completionPhotoUrl) {
+      request.completionPhotoUrl = completionPhotoUrl;
+    }
     await request.save();
 
     const alert = await Alert.create({
