@@ -6,6 +6,7 @@ const Activity = require('../entities/Activity');
 const mongoose = require('mongoose');
 const { notifyUser, notifyRequest, broadcastEvent } = require('../socket/socketManager');
 const { sendPushNotification } = require('../utils/notifications');
+const { addCompletedRequestToPortfolio } = require('../utils/portfolioHelper');
 
 async function createServiceRequest(req, res, next) {
   try {
@@ -270,6 +271,11 @@ async function updateRequestStatus(req, res, next) {
     }
 
     await request.save();
+
+    // Once a job is completed, add it to the technician's portfolio automatically.
+    if (status === 'completed') {
+      await addCompletedRequestToPortfolio(request);
+    }
 
     // Notify the other party
     const targetId = request.clientId === req.uid ? request.technicianId : request.clientId;

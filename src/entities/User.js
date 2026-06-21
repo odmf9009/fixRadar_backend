@@ -12,7 +12,7 @@ const userSchema = new mongoose.Schema({
   role: { type: String, enum: ['client', 'technician', 'admin'] },
   onboardingCompleted: { type: Boolean, default: false },
   specialties: [String],
-  rating: { type: Number, default: 5.0, min: 0, max: 5 },
+  rating: { type: Number, default: 0, min: 0, max: 5 },
   reviewsCount: { type: Number, default: 0 },
   points: { type: Number, default: 0 },
   totalXp: { type: Number, default: 0 },

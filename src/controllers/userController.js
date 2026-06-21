@@ -2,6 +2,7 @@ const User = require('../entities/User');
 const Review = require('../entities/Review');
 const Portfolio = require('../entities/Portfolio');
 const Activity = require('../entities/Activity');
+const { backfillTechnicianPortfolio } = require('../utils/portfolioHelper');
 
 async function getMe(req, res, next) {
   try {
@@ -126,6 +127,8 @@ async function getTopTechnicians(req, res, next) {
 
 async function getTechnicianPortfolio(req, res, next) {
   try {
+    // Retro-fit completed jobs that aren't in the portfolio yet.
+    await backfillTechnicianPortfolio(req.params.id);
     const items = await Portfolio.find({ technicianId: req.params.id }).sort({ createdAt: -1 }).lean();
     res.json(items);
   } catch (err) {
