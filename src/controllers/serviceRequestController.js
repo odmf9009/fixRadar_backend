@@ -312,12 +312,23 @@ async function deleteRequest(req, res, next) {
     if (!request) return res.status(404).json({ error: 'Request not found' });
     if (request.clientId !== req.uid) return res.status(403).json({ error: 'Forbidden' });
 
-    await ServiceRequest.findByIdAndDelete(req.params.id);
+    const requestId = req.params.id;
+
+    // Cascada: eliminar todo lo que cuelga del pedido para no dejar huérfanos
+    // (quotes/alerts que apunten a un pedido inexistente rompen "ver pedido"/"rechazar").
+    const quotes = await Quote.find({ requestId }).lean();
+    await Quote.deleteMany({ requestId });
+    await Alert.deleteMany({ requestId });
+
+    await ServiceRequest.findByIdAndDelete(requestId);
 
     // Notify the initiator so their local streams refresh
-    notifyUser(req.uid, 'request:deleted', {
-      requestId: req.params.id,
-    });
+    notifyUser(req.uid, 'request:deleted', { requestId });
+
+    // Avisar a cada técnico que había cotizado para que su lista de clientes se refresque
+    for (const q of quotes) {
+      notifyUser(q.technicianId, 'request:deleted', { requestId });
+    }
 
     res.json({ message: 'Request deleted' });
   } catch (err) {

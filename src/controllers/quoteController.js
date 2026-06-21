@@ -131,7 +131,15 @@ async function getQuotesForClient(req, res, next) {
     })
       .sort({ createdAt: -1 })
       .lean();
-    res.json(quotes);
+
+    // Defensivo: descartar cotizaciones huérfanas cuyo pedido ya no existe,
+    // para que la pantalla "técnicos que respondieron" nunca muestre tarjetas rotas.
+    const reqIds = [...new Set(quotes.map(q => String(q.requestId)).filter(Boolean))];
+    const existing = await ServiceRequest.find({ _id: { $in: reqIds } }, { _id: 1 }).lean();
+    const existingSet = new Set(existing.map(r => String(r._id)));
+    const valid = quotes.filter(q => existingSet.has(String(q.requestId)));
+
+    res.json(valid);
   } catch (err) {
     next(err);
   }
