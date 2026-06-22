@@ -17,7 +17,7 @@ async function getMe(req, res, next) {
 async function updateMe(req, res, next) {
   try {
     const allowedFields = [
-      'username', 'profileImageUrl', 'userType', 'role', 'onboardingCompleted',
+      'username', 'profileImageUrl', 'userType', 'role', 'onboardingCompleted', 'language',
       'specialties', 'bio', 'city', 'serviceRadius', 'companyName', 'yearsOfExperience',
       'freeQuote', 'emergencyService', 'workHours', 'weekendAvailability', 'phoneNumber',
       'isOnline', 'notificationsEnabled', 'presenceStatus',

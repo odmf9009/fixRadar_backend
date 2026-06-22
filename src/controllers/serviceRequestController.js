@@ -298,6 +298,39 @@ async function updateRequestStatus(req, res, next) {
         });
         notifyUser(request.technicianId, 'alert:new', completedAlert.toObject());
       }
+
+      // Técnico marcó "Ya estoy en el lugar" (assigned → inProgress): avisar al
+      // cliente que el técnico acaba de llegar, en su idioma preferido.
+      if (status === 'inProgress' && request.technicianId === req.uid) {
+        const client = await User.findById(request.clientId).select('language').lean();
+        const lang = client?.language === 'es' ? 'es' : 'en';
+        const techName = request.technicianName || 'El técnico';
+        const messages = {
+          en: {
+            title: 'Technician has arrived',
+            body: `${techName} just arrived at the incident location.`,
+          },
+          es: {
+            title: 'El técnico ha llegado',
+            body: `${techName} acaba de llegar al lugar de la incidencia.`,
+          },
+        };
+        const arrivalAlert = await Alert.create({
+          userId: request.clientId,
+          requestId: request._id.toString(),
+          requestTitle: messages[lang].title,
+          requestImageUrl: request.imageUrls?.[0] || '',
+          address: request.address,
+          distance: 0,
+          type: 'system',
+        });
+        notifyUser(request.clientId, 'alert:new', arrivalAlert.toObject());
+        sendPushNotification(request.clientId, {
+          title: messages[lang].title,
+          body: messages[lang].body,
+          data: { type: 'request_status', requestId: request._id.toString() },
+        });
+      }
     }
 
     // Also notify the initiator so their local streams refresh

@@ -11,6 +11,7 @@ const userSchema = new mongoose.Schema({
   userType: { type: String, enum: ['client', 'technician'] },
   role: { type: String, enum: ['client', 'technician', 'admin'] },
   onboardingCompleted: { type: Boolean, default: false },
+  language: { type: String, enum: ['en', 'es'], default: 'en' },
   specialties: [String],
   rating: { type: Number, default: 0, min: 0, max: 5 },
   reviewsCount: { type: Number, default: 0 },
