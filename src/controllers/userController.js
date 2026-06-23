@@ -2,7 +2,18 @@ const User = require('../entities/User');
 const Review = require('../entities/Review');
 const Portfolio = require('../entities/Portfolio');
 const Activity = require('../entities/Activity');
+const PhoneVerificationCode = require('../entities/PhoneVerificationCode');
 const { backfillTechnicianPortfolio } = require('../utils/portfolioHelper');
+const { sendVerificationSms } = require('../utils/smsService');
+
+// Normaliza un teléfono a dígitos con prefijo opcional '+'.
+function normalizePhone(raw) {
+  if (!raw) return '';
+  const trimmed = String(raw).trim();
+  const hasPlus = trimmed.startsWith('+');
+  const digits = trimmed.replace(/\D/g, '');
+  return hasPlus ? `+${digits}` : digits;
+}
 
 async function getMe(req, res, next) {
   try {
@@ -19,9 +30,11 @@ async function updateMe(req, res, next) {
     const allowedFields = [
       'username', 'profileImageUrl', 'userType', 'role', 'onboardingCompleted', 'language',
       'specialties', 'bio', 'city', 'serviceRadius', 'companyName', 'yearsOfExperience',
-      'freeQuote', 'emergencyService', 'workHours', 'weekendAvailability', 'phoneNumber',
+      'freeQuote', 'emergencyService', 'workHours', 'weekendAvailability',
       'isOnline', 'notificationsEnabled', 'presenceStatus',
     ];
+    // 'phoneNumber' se omite a propósito: el teléfono solo puede cambiarse a
+    // través del flujo verificado por SMS (sendPhoneCode / verifyPhoneCode).
     const update = {};
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) update[field] = req.body[field];
@@ -209,6 +222,71 @@ async function getFavoriteTechnicians(req, res, next) {
   }
 }
 
+// ─── PHONE VERIFICATION (SMS OTP via Twilio) ─────────────────────────────────
+
+// Paso 1: el usuario solicita un código para el número nuevo que quiere usar.
+async function sendPhoneCode(req, res, next) {
+  try {
+    const phone = normalizePhone(req.body.phone);
+    // Validación básica: 8 a 15 dígitos (E.164 admite hasta 15).
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length < 8 || digits.length > 15) {
+      return res.status(400).json({ error: 'Número de teléfono inválido' });
+    }
+
+    // Solo un código vigente por usuario.
+    await PhoneVerificationCode.deleteMany({ userId: req.uid });
+
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min
+
+    await PhoneVerificationCode.create({ userId: req.uid, phone, code, expiresAt });
+    await sendVerificationSms(phone, code);
+
+    res.json({ message: 'Código enviado por SMS.' });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// Paso 2: el usuario confirma el código; si coincide, se guarda y verifica.
+async function verifyPhoneCode(req, res, next) {
+  try {
+    const phone = normalizePhone(req.body.phone);
+    const { code } = req.body;
+    if (!phone || !code) {
+      return res.status(400).json({ error: 'Faltan datos' });
+    }
+
+    const record = await PhoneVerificationCode.findOne({
+      userId: req.uid,
+      phone,
+      used: false,
+      expiresAt: { $gt: new Date() },
+    }).sort({ createdAt: -1 });
+
+    if (!record) {
+      return res.status(400).json({ error: 'Código expirado. Solicita uno nuevo.' });
+    }
+    if (record.code !== String(code).trim()) {
+      return res.status(400).json({ error: 'Código incorrecto.' });
+    }
+
+    record.used = true;
+    await record.save();
+
+    const user = await User.findByIdAndUpdate(
+      req.uid,
+      { phoneNumber: phone, phoneVerified: true },
+      { new: true },
+    ).lean();
+
+    res.json(user);
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getMe,
   updateMe,
@@ -222,4 +300,6 @@ module.exports = {
   getMyActivity,
   toggleFavorite,
   getFavoriteTechnicians,
+  sendPhoneCode,
+  verifyPhoneCode,
 };

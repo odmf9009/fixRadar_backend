@@ -19,6 +19,17 @@ Variables de entorno relevantes (`.env`):
 | `MONGODB_URI` | Cadena de conexión a MongoDB |
 | `JWT_SECRET` | Secreto para firmar los JWT (default inseguro `fixradar-secret`) |
 | `JWT_EXPIRES_IN` | Expiración del JWT (default `30d`) |
+| `TWILIO_ACCOUNT_SID` | SID de Twilio para enviar SMS de verificación de teléfono |
+| `TWILIO_AUTH_TOKEN` | Token de Twilio |
+| `TWILIO_PHONE_NUMBER` | Número emisor de Twilio (formato E.164, p. ej. `+1...`) |
+
+> **Verificación de teléfono por SMS (Twilio):** si las variables `TWILIO_*` no
+> están configuradas (o el paquete `twilio` no está instalado), `smsService` cae
+> a un **fallback de desarrollo** que registra el código en consola
+> (`[sms:dev] ...`), de modo que el flujo `POST /api/users/me/phone/send-code` →
+> `POST /api/users/me/phone/verify` funciona de punta a punta sin proveedor real.
+> El teléfono solo puede establecerse/cambiarse a través de este flujo verificado
+> (`updateMe` ignora `phoneNumber`).
 
 Al arrancar se genera/carga un par de claves RSA (`initRsaKeys`) usado para
 desencriptar la contraseña que envía el cliente.
