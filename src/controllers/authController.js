@@ -5,6 +5,7 @@ const User = require('../entities/User');
 const VerificationCode = require('../entities/VerificationCode');
 const { getPublicKeyPem, decryptPassword } = require('../utils/rsaKeys');
 const { sendVerificationCode: sendCodeEmail } = require('../utils/emailService');
+const { AUTH_ERRORS, sendError } = require('../utils/errorCodes');
 
 // ─── Public key (no auth required) ───────────────────────────────────────────
 
@@ -18,14 +19,14 @@ async function sendVerification(req, res, next) {
   try {
     const { email } = req.body;
     if (!email || !email.includes('@')) {
-      return res.status(400).json({ message: 'Email inválido' });
+      return sendError(res, AUTH_ERRORS.INVALID_EMAIL);
     }
 
     const normalizedEmail = email.toLowerCase().trim();
 
     const existing = await User.findOne({ email: normalizedEmail, authProvider: 'email' });
     if (existing) {
-      return res.status(409).json({ message: 'Este email ya está registrado. Inicia sesión.' });
+      return sendError(res, AUTH_ERRORS.EMAIL_ALREADY_REGISTERED);
     }
 
     await VerificationCode.deleteMany({ email: normalizedEmail });
@@ -49,7 +50,7 @@ async function registerWithEmail(req, res, next) {
     const { email, encryptedPassword, name, verificationCode, referralCode } = req.body;
 
     if (!email || !encryptedPassword || !name || !verificationCode) {
-      return res.status(400).json({ message: 'Todos los campos son requeridos' });
+      return sendError(res, AUTH_ERRORS.MISSING_FIELDS);
     }
 
     const normalizedEmail = email.toLowerCase().trim();
@@ -62,16 +63,16 @@ async function registerWithEmail(req, res, next) {
     }).sort({ createdAt: -1 });
 
     if (!record) {
-      return res.status(400).json({ message: 'Código expirado. Solicita uno nuevo.' });
+      return sendError(res, AUTH_ERRORS.VERIFICATION_CODE_EXPIRED);
     }
     if (record.code !== verificationCode.trim()) {
-      return res.status(400).json({ message: 'Código incorrecto' });
+      return sendError(res, AUTH_ERRORS.VERIFICATION_CODE_INCORRECT);
     }
 
     // Check duplicate email
     const existing = await User.findOne({ email: normalizedEmail });
     if (existing) {
-      return res.status(409).json({ message: 'Este email ya está registrado' });
+      return sendError(res, AUTH_ERRORS.EMAIL_ALREADY_REGISTERED);
     }
 
     // Decrypt + hash password
@@ -79,7 +80,7 @@ async function registerWithEmail(req, res, next) {
     try {
       plainPassword = decryptPassword(encryptedPassword);
     } catch {
-      return res.status(400).json({ message: 'Error al procesar la contraseña' });
+      return sendError(res, AUTH_ERRORS.PASSWORD_PROCESSING_ERROR);
     }
     const hashedPassword = await bcrypt.hash(plainPassword, 12);
 
@@ -133,7 +134,9 @@ async function loginWithEmail(req, res, next) {
     const { email, encryptedPassword } = req.body;
 
     if (!email || !encryptedPassword) {
-      return res.status(400).json({ message: 'Email y contraseña son requeridos' });
+      return sendError(res, AUTH_ERRORS.MISSING_FIELDS, {
+        message: 'Email y contraseña son requeridos',
+      });
     }
 
     const normalizedEmail = email.toLowerCase().trim();
@@ -143,19 +146,19 @@ async function loginWithEmail(req, res, next) {
       .select('+password');
 
     if (!user) {
-      return res.status(401).json({ message: 'Credenciales incorrectas' });
+      return sendError(res, AUTH_ERRORS.INCORRECT_PASSWORD);
     }
 
     let plainPassword;
     try {
       plainPassword = decryptPassword(encryptedPassword);
     } catch {
-      return res.status(400).json({ message: 'Error al procesar la contraseña' });
+      return sendError(res, AUTH_ERRORS.PASSWORD_PROCESSING_ERROR);
     }
 
     const isValid = await bcrypt.compare(plainPassword, user.password);
     if (!isValid) {
-      return res.status(401).json({ message: 'Credenciales incorrectas' });
+      return sendError(res, AUTH_ERRORS.INCORRECT_PASSWORD);
     }
 
     const token = _signJwt(user._id, normalizedEmail);
@@ -181,6 +184,15 @@ async function syncUser(req, res, next) {
     let user = await User.findById(uid);
 
     if (!user) {
+      // El email ya pertenece a otra cuenta (p. ej. registrada con
+      // correo/contraseña) → conflicto de proveedor.
+      if (email) {
+        const emailOwner = await User.findOne({ email: email.toLowerCase().trim() });
+        if (emailOwner && emailOwner._id !== uid) {
+          return sendError(res, AUTH_ERRORS.EMAIL_REGISTERED_OTHER_PROVIDER);
+        }
+      }
+
       const myReferralCode = `${(name || 'USER').slice(0, 4).toUpperCase()}${uid.slice(-4).toUpperCase()}`;
       user = await User.create({
         _id: uid,
@@ -204,8 +216,9 @@ async function syncUser(req, res, next) {
     delete userObj.password;
     res.json({ user: userObj });
   } catch (err) {
+    // Carrera contra el índice único de email → mismo conflicto de proveedor.
     if (err.code === 11000) {
-      return res.status(400).json({ error: 'Email already exists' });
+      return sendError(res, AUTH_ERRORS.EMAIL_REGISTERED_OTHER_PROVIDER);
     }
     next(err);
   }
