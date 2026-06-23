@@ -32,9 +32,11 @@ async function updateMe(req, res, next) {
       'specialties', 'bio', 'city', 'serviceRadius', 'companyName', 'yearsOfExperience',
       'freeQuote', 'emergencyService', 'workHours', 'weekendAvailability',
       'isOnline', 'notificationsEnabled', 'presenceStatus',
+      // TEMPORAL (sin Twilio): el teléfono se edita y guarda sin verificación SMS.
+      // Cuando se reactive el OTP, quitar 'phoneNumber' y 'phoneVerified' de aquí
+      // para que solo puedan cambiarse vía sendPhoneCode / verifyPhoneCode.
+      'phoneNumber', 'phoneVerified',
     ];
-    // 'phoneNumber' se omite a propósito: el teléfono solo puede cambiarse a
-    // través del flujo verificado por SMS (sendPhoneCode / verifyPhoneCode).
     const update = {};
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) update[field] = req.body[field];
