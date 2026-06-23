@@ -32,11 +32,10 @@ async function updateMe(req, res, next) {
       'specialties', 'bio', 'city', 'serviceRadius', 'companyName', 'yearsOfExperience',
       'freeQuote', 'emergencyService', 'workHours', 'weekendAvailability',
       'isOnline', 'notificationsEnabled', 'presenceStatus',
-      // TEMPORAL (sin Twilio): el teléfono se edita y guarda sin verificación SMS.
-      // Cuando se reactive el OTP, quitar 'phoneNumber' y 'phoneVerified' de aquí
-      // para que solo puedan cambiarse vía sendPhoneCode / verifyPhoneCode.
-      'phoneNumber', 'phoneVerified',
     ];
+    // 'phoneNumber' se omite a propósito: el teléfono solo se cambia por su
+    // endpoint dedicado (updatePhone) y, cuando se active Twilio, por el flujo
+    // verificado por SMS (sendPhoneCode / verifyPhoneCode).
     const update = {};
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) update[field] = req.body[field];
@@ -224,6 +223,29 @@ async function getFavoriteTechnicians(req, res, next) {
   }
 }
 
+// Cambio directo del teléfono SIN verificación por SMS.
+// TEMPORAL: se usa mientras Twilio no está activo. Cuando se reactive el OTP,
+// el frontend volverá a usar sendPhoneCode / verifyPhoneCode en lugar de esto.
+async function updatePhone(req, res, next) {
+  try {
+    const phone = normalizePhone(req.body.phone);
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length < 8 || digits.length > 15) {
+      return res.status(400).json({ error: 'Número de teléfono inválido' });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.uid,
+      { phoneNumber: phone, phoneVerified: false },
+      { new: true },
+    ).lean();
+
+    res.json(user);
+  } catch (err) {
+    next(err);
+  }
+}
+
 // ─── PHONE VERIFICATION (SMS OTP via Twilio) ─────────────────────────────────
 
 // Paso 1: el usuario solicita un código para el número nuevo que quiere usar.
@@ -302,6 +324,7 @@ module.exports = {
   getMyActivity,
   toggleFavorite,
   getFavoriteTechnicians,
+  updatePhone,
   sendPhoneCode,
   verifyPhoneCode,
 };

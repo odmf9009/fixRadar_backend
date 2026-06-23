@@ -5,6 +5,7 @@ const ctrl = require('../controllers/userController');
 router.get('/me', authenticate, ctrl.getMe);
 router.put('/me', authenticate, ctrl.updateMe);
 router.put('/me/location', authenticate, ctrl.updateLocation);
+router.put('/me/phone', authenticate, ctrl.updatePhone);
 router.post('/me/phone/send-code', authenticate, ctrl.sendPhoneCode);
 router.post('/me/phone/verify', authenticate, ctrl.verifyPhoneCode);
 router.get('/me/activity', authenticate, ctrl.getMyActivity);
