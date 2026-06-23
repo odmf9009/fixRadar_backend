@@ -430,7 +430,7 @@ async function hideRequest(req, res, next) {
 
 async function finishWorkByTechnician(req, res, next) {
   try {
-    const { completionPhotoUrl } = req.body;
+    const { completionPhotoUrl, completionPhotoUrls } = req.body;
     const request = await ServiceRequest.findById(req.params.id);
     if (!request) return res.status(404).json({ error: 'Request not found' });
 
@@ -440,8 +440,14 @@ async function finishWorkByTechnician(req, res, next) {
 
     // Move to 'finishedByTechnician' so client can confirm
     request.status = 'finishedByTechnician';
-    if (completionPhotoUrl) {
-      request.completionPhotoUrl = completionPhotoUrl;
+    // Acepta una lista de hasta 3 fotos (completionPhotoUrls) y/o una sola
+    // (completionPhotoUrl) por compatibilidad con clientes viejos.
+    const photos = Array.isArray(completionPhotoUrls) && completionPhotoUrls.length > 0
+      ? completionPhotoUrls.filter(Boolean).slice(0, 3)
+      : (completionPhotoUrl ? [completionPhotoUrl] : []);
+    if (photos.length > 0) {
+      request.completionPhotoUrls = photos;
+      request.completionPhotoUrl = photos[0]; // primera foto = portada (portfolio/back-compat)
     }
     await request.save();
 

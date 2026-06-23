@@ -29,6 +29,7 @@ const serviceRequestSchema = new mongoose.Schema({
   minBudget: { type: Number, default: null },
   maxBudget: { type: Number, default: null },
   completionPhotoUrl: { type: String, default: null },
+  completionPhotoUrls: { type: [String], default: [] },
   completedAt: { type: Date, default: null },
   reviewRating: { type: Number, default: null },
   reviewComment: { type: String, default: null },
